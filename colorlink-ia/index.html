@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ColorLink · Portal de clientes</title>
+
+  <!-- Tipografías -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Estilos del proyecto -->
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React (UMD, sin necesidad de build) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+  <!-- Babel standalone: transforma JSX directamente en el navegador -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!--
+    Archivos de la app, en orden de dependencia.
+    Al no ser módulos ES, las funciones/const de nivel superior
+    quedan disponibles para los siguientes <script> de forma global.
+  -->
+  <script type="text/babel" src="js/icons.jsx"></script>
+  <script type="text/babel" src="js/data.jsx"></script>
+  <script type="text/babel" src="js/components/Field.jsx"></script>
+  <script type="text/babel" src="js/components/BrandPanel.jsx"></script>
+  <script type="text/babel" src="js/components/MobileHeader.jsx"></script>
+  <script type="text/babel" src="js/components/LoginView.jsx"></script>
+  <script type="text/babel" src="js/components/RegisterView.jsx"></script>
+  <script type="text/babel" src="js/components/RequestView.jsx"></script>
+  <script type="text/babel" src="js/components/SuccessView.jsx"></script>
+  <script type="text/babel" src="js/App.jsx"></script>
+</body>
+</html>
