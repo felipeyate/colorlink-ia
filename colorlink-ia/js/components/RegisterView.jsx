@@ -11,6 +11,7 @@ const RegisterView = ({ onSwitch, onRegistered }) => {
   const [showPw, setShowPw] = React.useState(false);
   const [showConfirm, setShowConfirm] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [formError, setFormError] = React.useState("");
 
   function validate() {
     const errs = {};
@@ -25,23 +26,67 @@ const RegisterView = ({ onSwitch, onRegistered }) => {
     return errs;
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setFormError("");
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     setLoading(true);
-    // TODO: reemplazar por supabase.auth.signUp({ email, password, options: { data: {...} } })
-    setTimeout(() => {
+
+    try {
+      if (supabase) {
+        const { data: authData, error } = await supabase.auth.signUp({
+          email: data.email.trim(),
+          password: data.password,
+          options: {
+            data: {
+              nombre: data.nombre.trim(),
+              empresa: data.empresa.trim(),
+              telefono: data.telefono.trim(),
+            },
+          },
+        });
+
+        if (error) throw error;
+
+        // Intentar guardar también en la tabla cliente si existe
+        try {
+          const telNum = parseInt(data.telefono.replace(/\D/g, "")) || null;
+          await supabase.from("cliente").insert([
+            {
+              nombre: data.nombre.trim(),
+              email: data.email.trim(),
+              telefono: telNum,
+              direccion: data.empresa.trim() || null,
+            },
+          ]);
+        } catch (tableErr) {
+          console.warn("Aviso al guardar en tabla cliente:", tableErr);
+        }
+
+        onRegistered({
+          id: authData.user?.id,
+          nombre: data.nombre.trim(),
+          empresa: data.empresa.trim(),
+          email: data.email.trim(),
+          telefono: data.telefono.trim(),
+        });
+      } else {
+        onRegistered({
+          nombre: data.nombre,
+          empresa: data.empresa,
+          email: data.email,
+          telefono: data.telefono,
+        });
+      }
+    } catch (err) {
+      console.error("Error en registro:", err);
+      setFormError(err.message || "Error al crear la cuenta.");
+    } finally {
       setLoading(false);
-      onRegistered({
-        nombre: data.nombre,
-        empresa: data.empresa,
-        email: data.email,
-        telefono: data.telefono,
-      });
-    }, 800);
+    }
   }
 
   return (
@@ -52,6 +97,8 @@ const RegisterView = ({ onSwitch, onRegistered }) => {
       <p className="card-subtitle">
         Con tu cuenta puedes radicar solicitudes y darles seguimiento.
       </p>
+
+      {formError && <div className="form-banner">{formError}</div>}
 
       <form onSubmit={handleSubmit} noValidate>
         <Field label="Nombre completo" htmlFor="reg-nombre" error={errors.nombre}>

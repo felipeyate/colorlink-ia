@@ -10,6 +10,7 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
   });
   const [errors, setErrors] = React.useState({});
   const [loading, setLoading] = React.useState(false);
+  const [formError, setFormError] = React.useState("");
 
   function validateStep1() {
     const errs = {};
@@ -44,18 +45,52 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
     setWizardStep(1);
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setFormError("");
     const errs = validateStep2();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     setLoading(true);
-    // TODO: reemplazar por supabase.from('solicitudes').insert([{ ...data, user_id }])
-    setTimeout(() => {
-      setLoading(false);
+
+    try {
+      if (supabase) {
+        // 1. Guardar cliente en Supabase
+        try {
+          const telNum = parseInt(data.telefono.replace(/\D/g, "")) || null;
+          await supabase.from("cliente").insert([
+            {
+              nombre: data.contactoNombre.trim(),
+              email: data.email.trim(),
+              telefono: telNum,
+              direccion: data.ubicacion.trim(),
+            },
+          ]);
+        } catch (cErr) {
+          console.warn("Aviso al guardar cliente:", cErr);
+        }
+
+        // 2. Guardar solicitud en Supabase
+        const { error: solError } = await supabase.from("solicitud").insert([
+          {
+            detalles: `${data.tipoProyecto} | Ubicación: ${data.ubicacion} | Contacto: ${data.contactoNombre} (${data.telefono}) | Mensaje: ${data.descripcion}`,
+            estado: "Pendiente",
+          },
+        ]);
+
+        if (solError) {
+          console.warn("Aviso al guardar solicitud en Supabase:", solError);
+        }
+      }
+
       onSubmitted(data);
-    }, 900);
+    } catch (err) {
+      console.error("Error al registrar solicitud:", err);
+      setFormError(err.message || "Error al enviar la solicitud.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -73,6 +108,8 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
         Con estos datos armamos tu solución técnica y comercial. Solo toma un
         par de minutos.
       </p>
+
+      {formError && <div className="form-banner">{formError}</div>}
 
       <div className="mini-stepper" aria-hidden="true">
         <span className={`mini-dot ${wizardStep >= 1 ? "is-on" : ""}`} />

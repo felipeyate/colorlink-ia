@@ -3,6 +3,42 @@ const App = () => {
   const [user, setUser] = React.useState(null);
   const [lastRequest, setLastRequest] = React.useState(null);
 
+  // Verificar si hay una sesión activa en Supabase al cargar la app
+  React.useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const meta = session.user.user_metadata || {};
+        setUser({
+          id: session.user.id,
+          nombre: meta.nombre || session.user.email.split("@")[0],
+          email: session.user.email,
+          telefono: meta.telefono || "",
+          empresa: meta.empresa || "",
+        });
+        setView("request");
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const meta = session.user.user_metadata || {};
+        setUser({
+          id: session.user.id,
+          nombre: meta.nombre || session.user.email.split("@")[0],
+          email: session.user.email,
+          telefono: meta.telefono || "",
+          empresa: meta.empresa || "",
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription?.unsubscribe?.();
+  }, []);
+
   const { activeIndex, completedIndex } = React.useMemo(() => {
     if (view === "success") return { activeIndex: 1, completedIndex: 0 };
     return { activeIndex: 0, completedIndex: -1 };
@@ -18,7 +54,10 @@ const App = () => {
     setView("request");
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     setUser(null);
     setLastRequest(null);
     setView("login");

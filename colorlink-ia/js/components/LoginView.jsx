@@ -13,7 +13,7 @@ const LoginView = ({ onSwitch, onLoggedIn }) => {
     return errs;
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     setFormError("");
     const errs = validate();
@@ -21,17 +21,46 @@ const LoginView = ({ onSwitch, onLoggedIn }) => {
     if (Object.keys(errs).length > 0) return;
 
     setLoading(true);
-    // TODO: reemplazar por supabase.auth.signInWithPassword({ email, password })
-    setTimeout(() => {
+
+    try {
+      if (supabase) {
+        const { data: authData, error } = await supabase.auth.signInWithPassword({
+          email: data.email.trim(),
+          password: data.password,
+        });
+
+        if (error) throw error;
+
+        const meta = authData.user?.user_metadata || {};
+        onLoggedIn({
+          id: authData.user.id,
+          nombre: meta.nombre || data.email.split("@")[0],
+          email: authData.user.email,
+          telefono: meta.telefono || "",
+          empresa: meta.empresa || "",
+        });
+      } else {
+        // Modo sin conexión o simulación
+        const nombre = data.email.split("@")[0];
+        onLoggedIn({
+          nombre: nombre.charAt(0).toUpperCase() + nombre.slice(1),
+          email: data.email,
+          telefono: "",
+          empresa: "",
+        });
+      }
+    } catch (err) {
+      console.error("Error en login:", err);
+      let msg = "Error al iniciar sesión. Verifica tus datos.";
+      if (err.message?.includes("Invalid login credentials")) {
+        msg = "Correo o contraseña incorrectos.";
+      } else if (err.message) {
+        msg = err.message;
+      }
+      setFormError(msg);
+    } finally {
       setLoading(false);
-      const nombre = data.email.split("@")[0];
-      onLoggedIn({
-        nombre: nombre.charAt(0).toUpperCase() + nombre.slice(1),
-        email: data.email,
-        telefono: "",
-        empresa: "",
-      });
-    }, 800);
+    }
   }
 
   return (
