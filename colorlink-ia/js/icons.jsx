@@ -198,3 +198,73 @@ const RotateCcw = (props) => (
     <path d="M3 3v6h6" />
   </IconBase>
 );
+
+const Bed = (props) => (
+  <IconBase {...props}>
+    <path d="M2 4v16" />
+    <path d="M2 8h18a2 2 0 0 1 2 2v10" />
+    <path d="M2 17h20" />
+    <path d="M6 8v4" />
+  </IconBase>
+);
+
+const Sofa = (props) => (
+  <IconBase {...props}>
+    <path d="M20 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3" />
+    <path d="M2 11v5a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H6v-2a2 2 0 0 0-4 0Z" />
+    <path d="M4 18v2" />
+    <path d="M20 18v2" />
+  </IconBase>
+);
+
+const Bath = (props) => (
+  <IconBase {...props}>
+    <path d="M9 6 6.5 3.5a1.5 1.5 0 0 0-1-1C4.7 2.5 4 3.2 4 4v2" />
+    <path d="M4 12h16a1 1 0 0 1 1 1v3a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4v-3a1 1 0 0 1 1-1Z" />
+    <path d="M6 19v2" />
+    <path d="M18 19v2" />
+  </IconBase>
+);
+
+const HomeIcon = (props) => (
+  <IconBase {...props}>
+    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <polyline points="9 22 9 12 15 12 15 22" />
+  </IconBase>
+);
+
+const Palette = (props) => (
+  <IconBase {...props}>
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.4-.4-.8-.4-1.3 0-.9.7-1.6 1.6-1.6H16c3.3 0 6-2.7 6-6 0-5.5-4.5-10-10-10Z" />
+  </IconBase>
+);
+
+const Sparkles = (props) => (
+  <IconBase {...props}>
+    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+  </IconBase>
+);
+
+const Check = (props) => (
+  <IconBase {...props}>
+    <polyline points="20 6 9 17 4 12" />
+  </IconBase>
+);
+
+const ChevronRight = (props) => (
+  <IconBase {...props}>
+    <polyline points="9 18 15 12 9 6" />
+  </IconBase>
+);
+
+const Layers = (props) => (
+  <IconBase {...props}>
+    <polygon points="12 2 2 7 12 12 22 7 12 2" />
+    <polyline points="2 17 12 22 22 17" />
+    <polyline points="2 12 12 17 22 12" />
+  </IconBase>
+);

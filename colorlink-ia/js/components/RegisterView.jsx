@@ -1,4 +1,4 @@
-const RegisterView = ({ onSwitch, onRegistered }) => {
+const RegisterView = ({ onSwitch, onRegistered, onGoHome }) => {
   const [data, setData] = React.useState({
     nombre: "",
     empresa: "",
@@ -91,7 +91,14 @@ const RegisterView = ({ onSwitch, onRegistered }) => {
 
   return (
     <div className="form-card">
-      <MobileHeader />
+      <div className="request-top">
+        {onGoHome && (
+          <button type="button" className="btn-ghost" onClick={onGoHome}>
+            <ArrowLeft size={15} /> Volver al portal
+          </button>
+        )}
+        <MobileHeader />
+      </div>
       <p className="card-eyebrow">Primera vez aquí</p>
       <h2 className="card-title">Crea tu cuenta</h2>
       <p className="card-subtitle">

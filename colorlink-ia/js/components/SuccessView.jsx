@@ -1,7 +1,13 @@
-const SuccessView = ({ data, onNewRequest, onLogout }) => (
+const SuccessView = ({ data, onNewRequest, onLogout, onGoHome }) => (
   <div className="form-card success-card">
     <div className="request-top">
-      <MobileHeader />
+      {onGoHome ? (
+        <button className="btn-ghost" onClick={onGoHome}>
+          <ArrowLeft size={15} /> Volver al portal
+        </button>
+      ) : (
+        <MobileHeader />
+      )}
       <button className="btn-ghost" onClick={onLogout}>
         <LogOut size={15} /> Cerrar sesión
       </button>
@@ -42,8 +48,15 @@ const SuccessView = ({ data, onNewRequest, onLogout }) => (
       </dl>
     </div>
 
-    <button className="btn-primary" onClick={onNewRequest}>
-      <RotateCcw size={18} /> Enviar otra solicitud
-    </button>
+    <div className="btn-row">
+      <button className="btn-primary" onClick={onNewRequest}>
+        <RotateCcw size={18} /> Otra solicitud
+      </button>
+      {onGoHome && (
+        <button className="btn-secondary" onClick={onGoHome}>
+          Ir al Inicio
+        </button>
+      )}
+    </div>
   </div>
 );

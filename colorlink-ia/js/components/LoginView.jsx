@@ -1,4 +1,4 @@
-const LoginView = ({ onSwitch, onLoggedIn }) => {
+const LoginView = ({ onSwitch, onLoggedIn, onGoHome }) => {
   const [data, setData] = React.useState({ email: "", password: "" });
   const [errors, setErrors] = React.useState({});
   const [showPw, setShowPw] = React.useState(false);
@@ -65,7 +65,14 @@ const LoginView = ({ onSwitch, onLoggedIn }) => {
 
   return (
     <div className="form-card">
-      <MobileHeader />
+      <div className="request-top">
+        {onGoHome && (
+          <button type="button" className="btn-ghost" onClick={onGoHome}>
+            <ArrowLeft size={15} /> Volver al portal
+          </button>
+        )}
+        <MobileHeader />
+      </div>
       <p className="card-eyebrow">Bienvenido de nuevo</p>
       <h2 className="card-title">Inicia sesión</h2>
       <p className="card-subtitle">

@@ -1,7 +1,9 @@
 const App = () => {
-  const [view, setView] = React.useState("login"); // login | register | request | success
+  const [view, setView] = React.useState("home"); // home | login | register | request | success
   const [user, setUser] = React.useState(null);
   const [lastRequest, setLastRequest] = React.useState(null);
+  const [selectedRoom, setSelectedRoom] = React.useState(null);
+  const [selectedColor, setSelectedColor] = React.useState(null);
 
   // Verificar si hay una sesión activa en Supabase al cargar la app
   React.useEffect(() => {
@@ -17,7 +19,6 @@ const App = () => {
           telefono: meta.telefono || "",
           empresa: meta.empresa || "",
         });
-        setView("request");
       }
     });
 
@@ -60,7 +61,7 @@ const App = () => {
     }
     setUser(null);
     setLastRequest(null);
-    setView("login");
+    setView("home");
   }
 
   function handleSubmitted(data) {
@@ -73,26 +74,74 @@ const App = () => {
     setView("request");
   }
 
+  function handleSelectRoomFromHome(room) {
+    setSelectedRoom(room);
+    setView("request");
+  }
+
+  function handleSelectColorFromHome(color) {
+    setSelectedColor(color);
+    setView("request");
+  }
+
   return (
     <div className="app-root">
-      <div className="shell">
-        <BrandPanel activeIndex={activeIndex} completedIndex={completedIndex} />
+      {view === "home" ? (
+        <div className="portal-wrapper">
+          <Navbar
+            user={user}
+            currentView={view}
+            onNavigate={setView}
+            onLogout={handleLogout}
+          />
+          <main>
+            <HomePortal
+              onStartQuote={() => setView("request")}
+              onSelectRoom={handleSelectRoomFromHome}
+              onSelectColor={handleSelectColorFromHome}
+            />
+          </main>
+        </div>
+      ) : (
+        <div className="shell">
+          <BrandPanel activeIndex={activeIndex} completedIndex={completedIndex} />
 
-        <main className="right-panel">
-          {view === "login" && (
-            <LoginView onSwitch={() => setView("register")} onLoggedIn={handleLoggedIn} />
-          )}
-          {view === "register" && (
-            <RegisterView onSwitch={() => setView("login")} onRegistered={handleRegistered} />
-          )}
-          {view === "request" && (
-            <RequestView user={user} onLogout={handleLogout} onSubmitted={handleSubmitted} />
-          )}
-          {view === "success" && lastRequest && (
-            <SuccessView data={lastRequest} onNewRequest={handleNewRequest} onLogout={handleLogout} />
-          )}
-        </main>
-      </div>
+          <main className="right-panel">
+            {view === "login" && (
+              <LoginView
+                onSwitch={() => setView("register")}
+                onLoggedIn={handleLoggedIn}
+                onGoHome={() => setView("home")}
+              />
+            )}
+            {view === "register" && (
+              <RegisterView
+                onSwitch={() => setView("login")}
+                onRegistered={handleRegistered}
+                onGoHome={() => setView("home")}
+              />
+            )}
+            {view === "request" && (
+              <RequestView
+                user={user}
+                onLogout={handleLogout}
+                onSubmitted={handleSubmitted}
+                onGoHome={() => setView("home")}
+                initialRoom={selectedRoom}
+                initialColor={selectedColor}
+              />
+            )}
+            {view === "success" && lastRequest && (
+              <SuccessView
+                data={lastRequest}
+                onNewRequest={handleNewRequest}
+                onLogout={handleLogout}
+                onGoHome={() => setView("home")}
+              />
+            )}
+          </main>
+        </div>
+      )}
     </div>
   );
 };

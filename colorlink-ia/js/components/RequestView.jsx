@@ -1,12 +1,24 @@
-const RequestView = ({ user, onLogout, onSubmitted }) => {
+const RequestView = ({
+  user,
+  onLogout,
+  onSubmitted,
+  onGoHome,
+  initialRoom,
+  initialColor,
+}) => {
   const [wizardStep, setWizardStep] = React.useState(1);
   const [data, setData] = React.useState({
-    tipoProyecto: "",
+    tipoProyecto: initialRoom ? "Residencial" : "",
     ubicacion: "",
     contactoNombre: user?.nombre || "",
     telefono: user?.telefono || "",
     email: user?.email || "",
-    descripcion: "",
+    descripcion: [
+      initialRoom ? `Espacio: ${initialRoom.name} (${initialRoom.pintucoLine})` : "",
+      initialColor ? `Color: ${initialColor.name} [${initialColor.code} - ${initialColor.hex}]` : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
   });
   const [errors, setErrors] = React.useState({});
   const [loading, setLoading] = React.useState(false);
@@ -71,10 +83,10 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
           console.warn("Aviso al guardar cliente:", cErr);
         }
 
-        // 2. Guardar solicitud en Supabase
+        // 2. Guardar solicitud en Supabase con color y ambiente
         const { error: solError } = await supabase.from("solicitud").insert([
           {
-            detalles: `${data.tipoProyecto} | Ubicación: ${data.ubicacion} | Contacto: ${data.contactoNombre} (${data.telefono}) | Mensaje: ${data.descripcion}`,
+            detalles: `${data.tipoProyecto} | Ubicación: ${data.ubicacion} | Contacto: ${data.contactoNombre} (${data.telefono}) | Especificaciones: ${data.descripcion}`,
             estado: "Pendiente",
           },
         ]);
@@ -96,7 +108,13 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
   return (
     <div className="form-card">
       <div className="request-top">
-        <MobileHeader />
+        {onGoHome ? (
+          <button className="btn-ghost" onClick={onGoHome}>
+            <ArrowLeft size={15} /> Volver al portal
+          </button>
+        ) : (
+          <MobileHeader />
+        )}
         <button className="btn-ghost" onClick={onLogout}>
           <LogOut size={15} /> Cerrar sesión
         </button>
@@ -105,9 +123,28 @@ const RequestView = ({ user, onLogout, onSubmitted }) => {
       <p className="card-eyebrow">Hola, {user?.nombre?.split(" ")[0] || "de nuevo"}</p>
       <h2 className="card-title">Cuéntanos tu necesidad</h2>
       <p className="card-subtitle">
-        Con estos datos armamos tu solución técnica y comercial. Solo toma un
-        par de minutos.
+        Con estos datos armamos tu solución técnica y comercial Pintuco. Solo toma un par de minutos.
       </p>
+
+      {/* Pill de preselección desde el explorador */}
+      {(initialRoom || initialColor) && (
+        <div className="selection-preview-pill">
+          {initialRoom && (
+            <span className="pill-room-tag">
+              🏠 Espacio: <strong>{initialRoom.name}</strong>
+            </span>
+          )}
+          {initialColor && (
+            <span className="pill-color-tag">
+              <span
+                className="pill-color-dot"
+                style={{ backgroundColor: initialColor.hex }}
+              />
+              Tono: <strong>{initialColor.name}</strong> ({initialColor.code})
+            </span>
+          )}
+        </div>
+      )}
 
       {formError && <div className="form-banner">{formError}</div>}
 
