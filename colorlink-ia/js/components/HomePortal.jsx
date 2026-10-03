@@ -1,4 +1,18 @@
-const HomePortal = ({ onStartQuote, onSelectRoom, onSelectColor }) => {
+const HomePortal = ({
+  onStartQuote,
+  onSelectRoom,
+  onSelectColor,
+  onSelectProduct,
+  onApplyCalculation,
+}) => {
+  const [calcProduct, setCalcProduct] = React.useState(null);
+
+  function handleCalculateProduct(prod) {
+    setCalcProduct(prod);
+    const el = document.getElementById("calculadora");
+    if (el) el.scrollIntoView({ behavior: "smooth" });
+  }
+
   return (
     <div className="home-portal-root">
       {/* Hero Section */}
@@ -15,8 +29,8 @@ const HomePortal = ({ onStartQuote, onSelectRoom, onSelectColor }) => {
           </h1>
 
           <p className="hero-subtitle">
-            Elige tu ambiente, explora la paleta de colores con tecnología bajo olor
-            y cotiza tu proyecto con asesoría experta y disponibilidad garantizada.
+            Explora las líneas oficiales Pintuco, calcula los galones exactos para tus muros
+            y cotiza tu proyecto con garantía y disponibilidad inmediata.
           </p>
 
           <div className="hero-actions">
@@ -27,8 +41,11 @@ const HomePortal = ({ onStartQuote, onSelectRoom, onSelectColor }) => {
             >
               Radicar Solicitud <ArrowRight size={18} />
             </button>
-            <a href="#colores" className="btn-secondary btn-lg">
-              <Palette size={18} /> Explorar Colores
+            <a href="#catalogo" className="btn-secondary btn-lg">
+              <Paintbrush size={18} /> Ver Catálogo Pintuco
+            </a>
+            <a href="#calculadora" className="btn-secondary btn-lg">
+              <Calculator size={18} /> Calculadora de Pintura
             </a>
           </div>
 
@@ -47,6 +64,11 @@ const HomePortal = ({ onStartQuote, onSelectRoom, onSelectColor }) => {
               <span className="stat-num">5 Años</span>
               <span className="stat-label">Garantía Koraza</span>
             </div>
+            <div className="stat-divider" />
+            <div className="stat-item">
+              <span className="stat-num">99.9%</span>
+              <span className="stat-label">Antibacterial</span>
+            </div>
           </div>
         </div>
       </section>
@@ -54,9 +76,20 @@ const HomePortal = ({ onStartQuote, onSelectRoom, onSelectColor }) => {
       {/* Infinite Marquee de Inspiración */}
       <InfiniteMarquee
         onSelectSlide={(slide) => {
-          // Si el usuario hace clic en una diapositiva, se le sugiere empezar
           onStartQuote();
         }}
+      />
+
+      {/* Catálogo Oficial de Pinturas Pintuco */}
+      <PintucoCatalog
+        onSelectProduct={onSelectProduct}
+        onCalculateProduct={handleCalculateProduct}
+      />
+
+      {/* Calculadora Oficial Pintuco */}
+      <PaintCalculator
+        initialProduct={calcProduct}
+        onApplyCalculation={onApplyCalculation}
       />
 
       {/* Shop by Room: Categorías por Espacio */}

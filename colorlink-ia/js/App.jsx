@@ -4,6 +4,8 @@ const App = () => {
   const [lastRequest, setLastRequest] = React.useState(null);
   const [selectedRoom, setSelectedRoom] = React.useState(null);
   const [selectedColor, setSelectedColor] = React.useState(null);
+  const [selectedProduct, setSelectedProduct] = React.useState(null);
+  const [selectedCalculation, setSelectedCalculation] = React.useState(null);
 
   // Verificar si hay una sesión activa en Supabase al cargar la app
   React.useEffect(() => {
@@ -61,6 +63,8 @@ const App = () => {
     }
     setUser(null);
     setLastRequest(null);
+    setSelectedProduct(null);
+    setSelectedCalculation(null);
     setView("home");
   }
 
@@ -71,6 +75,8 @@ const App = () => {
 
   function handleNewRequest() {
     setLastRequest(null);
+    setSelectedProduct(null);
+    setSelectedCalculation(null);
     setView("request");
   }
 
@@ -81,6 +87,19 @@ const App = () => {
 
   function handleSelectColorFromHome(color) {
     setSelectedColor(color);
+    setView("request");
+  }
+
+  function handleSelectProductFromHome(product, presentation) {
+    setSelectedProduct({ ...product, selectedPres: presentation });
+    setView("request");
+  }
+
+  function handleApplyCalculationFromHome(calc) {
+    setSelectedCalculation(calc);
+    if (calc?.product) {
+      setSelectedProduct(calc.product);
+    }
     setView("request");
   }
 
@@ -99,6 +118,8 @@ const App = () => {
               onStartQuote={() => setView("request")}
               onSelectRoom={handleSelectRoomFromHome}
               onSelectColor={handleSelectColorFromHome}
+              onSelectProduct={handleSelectProductFromHome}
+              onApplyCalculation={handleApplyCalculationFromHome}
             />
           </main>
         </div>
@@ -129,6 +150,8 @@ const App = () => {
                 onGoHome={() => setView("home")}
                 initialRoom={selectedRoom}
                 initialColor={selectedColor}
+                initialProduct={selectedProduct}
+                initialCalculation={selectedCalculation}
               />
             )}
             {view === "success" && lastRequest && (

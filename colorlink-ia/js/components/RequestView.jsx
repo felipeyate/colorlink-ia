@@ -5,10 +5,16 @@ const RequestView = ({
   onGoHome,
   initialRoom,
   initialColor,
+  initialProduct,
+  initialCalculation,
 }) => {
   const [wizardStep, setWizardStep] = React.useState(1);
   const [data, setData] = React.useState({
-    tipoProyecto: initialRoom ? "Residencial" : "",
+    tipoProyecto: initialRoom
+      ? "Residencial"
+      : initialProduct
+      ? initialProduct.categoryLabel
+      : "",
     ubicacion: "",
     contactoNombre: user?.nombre || "",
     telefono: user?.telefono || "",
@@ -16,6 +22,10 @@ const RequestView = ({
     descripcion: [
       initialRoom ? `Espacio: ${initialRoom.name} (${initialRoom.pintucoLine})` : "",
       initialColor ? `Color: ${initialColor.name} [${initialColor.code} - ${initialColor.hex}]` : "",
+      initialProduct ? `Pintura: ${initialProduct.name} (${initialProduct.selectedPres?.label || 'Galón'})` : "",
+      initialCalculation
+        ? `Cálculo: ${initialCalculation.gallonsNeeded} Gal (~${initialCalculation.netArea} m², ${initialCalculation.packagesText}) · Est: $${initialCalculation.estimatedCOP?.toLocaleString('es-CO')} COP`
+        : "",
     ]
       .filter(Boolean)
       .join(" · "),
@@ -127,7 +137,7 @@ const RequestView = ({
       </p>
 
       {/* Pill de preselección desde el explorador */}
-      {(initialRoom || initialColor) && (
+      {(initialRoom || initialColor || initialProduct || initialCalculation) && (
         <div className="selection-preview-pill">
           {initialRoom && (
             <span className="pill-room-tag">
@@ -141,6 +151,16 @@ const RequestView = ({
                 style={{ backgroundColor: initialColor.hex }}
               />
               Tono: <strong>{initialColor.name}</strong> ({initialColor.code})
+            </span>
+          )}
+          {initialProduct && (
+            <span className="pill-product-tag">
+              🎨 Pintura: <strong>{initialProduct.name}</strong> ({initialProduct.selectedPres?.label || '1 Galón'})
+            </span>
+          )}
+          {initialCalculation && (
+            <span className="pill-calc-tag">
+              📐 Estimado: <strong>{initialCalculation.packagesText}</strong> ({initialCalculation.netArea} m²)
             </span>
           )}
         </div>

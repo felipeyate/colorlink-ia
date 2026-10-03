@@ -16,6 +16,34 @@ const Navbar = ({ user, currentView, onNavigate, onLogout }) => {
 
         <nav className={`navbar-links ${mobileMenuOpen ? "is-open" : ""}`}>
           <a
+            href="#catalogo"
+            onClick={(e) => {
+              e.preventDefault();
+              setMobileMenuOpen(false);
+              onNavigate("home");
+              setTimeout(() => {
+                const el = document.getElementById("catalogo");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }, 100);
+            }}
+          >
+            Catálogo
+          </a>
+          <a
+            href="#calculadora"
+            onClick={(e) => {
+              e.preventDefault();
+              setMobileMenuOpen(false);
+              onNavigate("home");
+              setTimeout(() => {
+                const el = document.getElementById("calculadora");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }, 100);
+            }}
+          >
+            Calculadora
+          </a>
+          <a
             href="#ambientes"
             onClick={(e) => {
               e.preventDefault();
