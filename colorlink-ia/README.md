@@ -1,70 +1,96 @@
-# ColorLink · Frontend (portal de clientes)
+# ColorLink · Ecosistema Integral de Pintura Inteligente Pintuco S.A.
 
-Frontend en React del reto transversal **ColorLink** (Pintuco), enfocado en
-registro, inicio de sesión y el formulario de solicitud del cliente.
+> **Proyecto Transversal · Electiva IV (Universidad Cooperativa de Colombia - UCC)**  
+> Plataforma de transformación digital que conecta integralmente el ciclo de vida de la pintura: desde la necesidad del cliente y formulación técnica hasta el despacho en CEDI, facturación electrónica y garantía de calidad.
 
-Este proyecto **no usa Node, npm ni ningún bundler**. React y Babel se
-cargan desde un CDN y Babel transforma el JSX directamente en el navegador,
-así que puedes ejecutarlo abriendo `index.html` con la extensión **Live
-Server** de VS Code, sin instalar nada más.
+---
 
-## Cómo ejecutarlo
+## 🎨 Características Principales
 
-1. Abre la carpeta `colorlink-frontend` en Visual Studio Code.
-2. Instala la extensión **Live Server** (Ritwick Dey) si no la tienes — VS
-   Code te la va a sugerir automáticamente gracias a `.vscode/extensions.json`.
-3. Click derecho sobre `index.html` → **"Open with Live Server"**
-   (o el botón "Go Live" en la barra inferior).
-4. Se abre en el navegador en algo como `http://127.0.0.1:5500`.
+### 1. Portal Comercial & Experiencia de Usuario
+- **Portafolio Oficial Pintuco:** Líneas arquitectónicas, fachadas, maderas, metales e industriales (Viniltex BioCuidado, Koraza Sol & Lluvia, Pintulux 3 en 1, Pintucoat Epóxico, Sellomax, etc.).
+- **Paleta Oficial "Brisa Marina Clásica":** Selección armónica de tonos (Brisa Caribeña, Menta Salvia, Azul Pizarra, Mar Profundo, Luz de Arena, etc.) con simulador en tiempo real.
+- **Formulación por Ambientes:** Soluciones específicas para salas, fachadas, alcobas, cocinas/baños y pisos de alto tráfico.
+- **Proyectos Reales de Clientes:** Casos de éxito con testimonios, productos aplicados y rendimiento en m².
 
-> Necesitas conexión a internet la primera vez, porque React, ReactDOM y
-> Babel standalone se cargan desde CDN (unpkg.com) y las tipografías desde
-> Google Fonts.
+### 2. Motor de Cálculo Técnico Oficial Pintuco
+- **Cálculo por Dimensiones:** Ingreso de ancho, alto y número de muros con deducción paramétrica de puertas y ventanas.
+- **Cálculo por Área Directa:** Desglose exacto en cuñetes (5 Gal) y galones individuales para optimizar desperdicio.
+- **Insumos y Preparación:** Sugerencia automática de imprimantes, selladores, lijas, masillas, brochas y rodillos según la superficie.
+- **Presupuesto Estimado:** Costeo de referencia en pesos colombianos (COP).
 
-## Estructura del proyecto
+### 3. Ecosistema Transversal (12 Tablas ERD en Supabase)
+El sistema implementa y sincroniza las 12 entidades del Reto Transversal:
+1. `Usuario` (Roles y accesos)
+2. `Canal` (Directo Pintuco, Portal Web, Distribuidor Aliado, Constructor VIP)
+3. `Cliente` (Constructoras y clientes residenciales)
+4. `Proyecto` (Obras y presupuestos)
+5. `Inventario` (Catálogo con SKUs y stock en CEDI Rionegro)
+6. `Solicitud` (Requerimiento técnico de metraje, superficie y color)
+7. `Material` (Materiales asignados para alistamiento)
+8. `Pedido` (Detalles de empaque, peso en kg, sellos de calidad y QR)
+9. `Cotización` (Cálculo formal valorizado)
+10. `Factura` (Facturación electrónica con exportación a PDF)
+11. `Entrega` (Despacho, conductor asignado, ruta y firma digital)
+12. `Control de Calidad` (Inspección técnica de película y certificado PDF)
 
-```
-colorlink-frontend/
-├── index.html                  # Punto de entrada, carga CDN + scripts en orden
-├── css/
-│   └── styles.css              # Todos los estilos (paleta navy/teal/lilac)
-└── js/
-    ├── icons.jsx                # Íconos SVG propios (sin dependencias externas)
-    ├── data.jsx                 # Pasos del proceso, opciones y regex de validación
-    ├── App.jsx                  # Componente raíz: maneja qué vista se muestra
-    └── components/
-        ├── Field.jsx             # Campo de formulario + botón primario reutilizables
-        ├── BrandPanel.jsx        # Panel izquierdo: marca + "hilo del proceso"
-        ├── MobileHeader.jsx      # Encabezado compacto para pantallas chicas
-        ├── LoginView.jsx         # Inicio de sesión
-        ├── RegisterView.jsx      # Creación de cuenta
-        ├── RequestView.jsx       # Formulario de solicitud (2 pasos)
-        └── SuccessView.jsx       # Confirmación con resumen de la solicitud
-```
+### 4. Dashboards por Rol Operativo
+- **Administrador:** Métricas operativas, control de stock en bodegas, gestión de usuarios y pedidos.
+- **Cliente:** Consulta de cotizaciones, timeline de despacho en vivo y descarga de facturas/certificados.
+- **Empacador (CEDI):** Checklist de verificación de empaque, asignación de lotes y precintos de seguridad.
+- **Conductor (Logística):** Rutas de entrega en ciudades colombianas y captura de firma de recibido.
+- **Ecosistema Transversal:** Vista de visualización global del flujo del proyecto.
 
-Los archivos `.jsx` se cargan en `index.html` como `<script type="text/babel">`
-**en orden de dependencia** (íconos y datos primero, luego componentes,
-al final `App.jsx`). Como no son módulos ES, las funciones y `const` de
-nivel superior de cada archivo quedan disponibles como variables globales
-para los siguientes scripts — por eso el orden en `index.html` importa.
+### 5. Herramientas Avanzadas Integradas
+- **Asistente de IA (Gemini):** Consultor técnico virtual con la API de Google Gemini para asesoría técnica de aplicación.
+- **Generación de PDFs:** Descarga instantánea de Factura DIAN y Certificados de Calidad con `jsPDF` y `html2canvas`.
+- **Notificaciones por Correo:** Buzón interactivo que notifica automáticamente los cambios de estado de cada pedido.
+- **Supabase Cloud:** Sincronización en tiempo real y persistencia local integrada.
 
-## Flujo actual
+---
 
-`Login` → `Registro` → `Formulario de solicitud (2 pasos)` → `Confirmación`
+## 🛠️ Tecnologías Utilizadas
 
-El panel izquierdo muestra el hilo del proceso completo (Necesidad →
-Solución técnica → Abastecimiento → Servicio → Calidad) y va marcando en
-qué paso está el cliente.
+- **Frontend:** React 19, TypeScript, Tailwind CSS v4, Motion
+- **Empaquetador:** Vite 6
+- **Base de Datos & Backend:** Supabase (PostgreSQL + RLS)
+- **IA:** Google Gen AI SDK (`@google/genai`)
+- **Documentos & Exportación:** jsPDF, html2canvas
+- **Iconografía:** Lucide React
 
-## Conexión futura a Supabase
+---
 
-Por ahora todo funciona en memoria (sin `localStorage`, para que sea
-compatible con cualquier entorno). Busca los comentarios `// TODO` en:
+## 🚀 Instalación y Ejecución Local
 
-- `js/components/LoginView.jsx` → reemplazar por `supabase.auth.signInWithPassword(...)`
-- `js/components/RegisterView.jsx` → reemplazar por `supabase.auth.signUp(...)`
-- `js/components/RequestView.jsx` → reemplazar por `supabase.from('solicitudes').insert([...])`
+### Prerrequisitos
+- Node.js (versión 18 o superior recomendada)
+- npm
 
-Cuando conectes Supabase, lo más simple será agregar el SDK
-(`@supabase/supabase-js`) vía CDN en `index.html`, igual que React, y crear
-un archivo `js/supabaseClient.jsx` con la inicialización del cliente.
+### Pasos
+1. Clonar el repositorio:
+   ```bash
+   git clone https://github.com/felipeyate/colorlink-ia.git
+   cd colorlink-ia
+   ```
+
+2. Instalar dependencias:
+   ```bash
+   npm install
+   ```
+
+3. Iniciar el servidor de desarrollo:
+   ```bash
+   npm run dev
+   ```
+   Abre [http://localhost:3000](http://localhost:3000) en tu navegador.
+
+4. Para compilar la versión de producción:
+   ```bash
+   npm run build
+   ```
+
+---
+
+## 👥 Colaboradores
+- **Felipe Yate**
+- **Equipo de Proyecto Electiva IV · UCC**
