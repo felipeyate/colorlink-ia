@@ -7,7 +7,17 @@ import {
   User,
   signOut,
 } from 'firebase/auth';
-import firebaseConfig from '../firebase-applet-config.json';
+
+// Configuración de Firebase leída desde variables de entorno seguras (VITE_)
+// con fallback a los identificadores del proyecto para compatibilidad local
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyB3pIJjvEdlTQvniDEv1n63AOOrheo9Sww',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0377411403.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0377411403',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'gen-lang-client-0377411403.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '450090478145',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:450090478145:web:4cb91e9c62a6732b1ab4c0',
+};
 
 // Inicializar la app de Firebase una sola vez
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();

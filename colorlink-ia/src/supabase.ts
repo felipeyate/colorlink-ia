@@ -302,30 +302,16 @@ export function normalizeSupabaseUrl(url: string): string {
 
 export function getSupabaseConfig(): SupabaseConfig {
   try {
-    const envUrl = normalizeSupabaseUrl((import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL);
-    const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY).trim();
+    const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL
+      ? normalizeSupabaseUrl((import.meta as any).env.VITE_SUPABASE_URL)
+      : '';
+    const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '').trim();
 
     const stored = localStorage.getItem('colorlink_supabase_config');
     if (stored) {
       const parsed = JSON.parse(stored);
-      // Si la URL o clave almacenada no coinciden con las credenciales oficiales activas del usuario,
-      // actualizamos automáticamente para que no quede atascado en un proyecto anterior o erróneo.
-      let url = normalizeSupabaseUrl(parsed.url || envUrl || DEFAULT_SUPABASE_URL);
-      let anonKey = (parsed.anonKey || envKey || DEFAULT_SUPABASE_KEY).trim();
-
-      if (!url.includes('pxtskluzbcxydzqaigke') || !anonKey.startsWith('sb_publishable_9_jnKRBi4Ya6wkT_ZHXiUw_AI6Aaih1')) {
-        url = DEFAULT_SUPABASE_URL;
-        anonKey = DEFAULT_SUPABASE_KEY;
-        localStorage.setItem(
-          'colorlink_supabase_config',
-          JSON.stringify({
-            url,
-            anonKey,
-            connected: true,
-            lastSync: parsed.lastSync || new Date().toLocaleTimeString(),
-          })
-        );
-      }
+      const url = normalizeSupabaseUrl(parsed.url || envUrl || DEFAULT_SUPABASE_URL);
+      const anonKey = (parsed.anonKey || envKey || DEFAULT_SUPABASE_KEY).trim();
 
       return {
         url,
@@ -335,11 +321,13 @@ export function getSupabaseConfig(): SupabaseConfig {
       };
     }
 
-    // Si no había guardado nada previamente, guardar las credenciales oficiales activas
+    // Si no había guardado nada previamente, usar variables de entorno o credenciales por defecto
+    const initialUrl = envUrl || DEFAULT_SUPABASE_URL;
+    const initialKey = envKey || DEFAULT_SUPABASE_KEY;
     const defaultConfig: SupabaseConfig = {
-      url: DEFAULT_SUPABASE_URL,
-      anonKey: DEFAULT_SUPABASE_KEY,
-      connected: true,
+      url: initialUrl,
+      anonKey: initialKey,
+      connected: !!(initialUrl && initialKey),
     };
     localStorage.setItem('colorlink_supabase_config', JSON.stringify(defaultConfig));
     return defaultConfig;
