@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { PaintRequest, UserProfile, SurfaceType, WarehouseInventoryItem, PendingRequestData, OrderItem } from '../types';
+import { PaintRequest, UserProfile, SurfaceType, WarehouseInventoryItem, PendingRequestData, OrderItem, OrderChatMessage } from '../types';
 import { isPaintProduct, getProductImage } from '../data';
 import { isSameCity } from '../utils/cityUtils';
 import { RequestView } from './RequestView';
 import { InvoiceModal } from './InvoiceModal';
+import { OrderChatModal } from './OrderChatModal';
 import {
-  sendOrderPackedEmail,
-  sendOrderInTransitEmail,
-  sendOrderDeliveredEmail,
   getEmailsForUser,
   openInGmail,
   openInEmailClient,
+  openInOutlook,
+  buildEmailPlainText,
 } from '../emailService';
 import {
   Building,
@@ -47,6 +47,7 @@ import {
   ExternalLink,
   Package,
   Trash2,
+  MessageSquare,
 } from '../icons';
 
 interface ClientDashboardProps {
@@ -64,6 +65,25 @@ interface ClientDashboardProps {
   onOpenInvoice?: (request: PaintRequest) => void;
   onLogout: () => void;
   onViewTransversal: () => void;
+  cartItems?: Array<{
+    id: string;
+    item: WarehouseInventoryItem;
+    quantity: number;
+    format: 'galon' | 'cuñete' | 'cuarto' | 'unidad';
+    selectedColor?: { name: string; hex: string };
+    unitPrice: number;
+    totalCostCOP: number;
+  }>;
+  onAddToCart?: (
+    item: WarehouseInventoryItem,
+    quantity?: number,
+    format?: 'galon' | 'cuñete' | 'cuarto' | 'unidad',
+    color?: { name: string; hex: string }
+  ) => void;
+  onUpdateCartQty?: (cartId: string, delta: number) => void;
+  onRemoveFromCart?: (cartId: string) => void;
+  onClearCart?: () => void;
+  onOpenCart?: () => void;
 }
 
 export const ClientDashboard: React.FC<ClientDashboardProps> = ({
@@ -81,16 +101,58 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onOpenInvoice,
   onLogout,
   onViewTransversal,
+  cartItems: propsCartItems,
+  onAddToCart,
+  onUpdateCartQty: propsUpdateQty,
+  onRemoveFromCart: propsRemoveItem,
+  onClearCart: propsClearCart,
+  onOpenCart,
 }) => {
   const [activeTab, setActiveTab] = useState<'nueva_solicitud' | 'mis_pedidos' | 'catalogo_inventario' | 'mis_accesos' | 'mis_correos'>(
     () => (initialPendingData ? 'nueva_solicitud' : requests.filter((r) => r.clientEmail?.toLowerCase() === currentUser.email?.toLowerCase()).length === 0 ? 'nueva_solicitud' : 'mis_pedidos')
   );
   const [selectedReqId, setSelectedReqId] = useState<string>('');
+  const [copiedEmailId, setCopiedEmailId] = useState<string | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<PaintRequest | null>(null);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<string>('todos');
   const [catalogWarehouseFilter, setCatalogWarehouseFilter] = useState<string>('todos');
   const [orderSuccessBanner, setOrderSuccessBanner] = useState<string | null>(null);
+
+  // Chat estilo Wasap con el conductor en tiempo real
+  const [chatReqId, setChatReqId] = useState<string | null>(null);
+
+  const handleSendMessage = (requestId: string, messageText: string) => {
+    const req = requests.find((r) => r.id === requestId);
+    if (!req) return;
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const newMsg: OrderChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      senderRole: 'cliente',
+      senderName: currentUser.name || 'Cliente',
+      message: messageText,
+      timestamp: timeStr,
+      createdAtIso: now.toISOString(),
+    };
+
+    const updatedReq: PaintRequest = {
+      ...req,
+      chatMessages: [...(req.chatMessages || []), newMsg],
+    };
+
+    if (onUpdateRequest) {
+      onUpdateRequest(updatedReq);
+    }
+    try {
+      window.dispatchEvent(
+        new CustomEvent('colorlink-order-chat-updated', {
+          detail: { requestId, message: newMsg, updatedRequest: updatedReq },
+        })
+      );
+    } catch {}
+  };
 
   // Inventario restringido exclusivamente a la Ciudad Principal del cliente
   const clientCity = currentUser.city || 'Medellín';
@@ -119,114 +181,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     };
   }, [currentUser.email]);
 
-  const handleSimulatePacked = (req: PaintRequest) => {
-    const now = new Date();
-    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const updated: PaintRequest = {
-      ...req,
-      packagingDetails: {
-        packerId: 'usr-pac-1',
-        packerName: 'Javier Gómez (CEDI Rionegro)',
-        packedAt: timeStr,
-        batchCode: req.inventoryAllocation?.batchNumber || `LOTE-PTC-2026-B${Math.floor(Math.random() * 89 + 10)}`,
-        checkedSupplies: ['Sello de Precinto', 'Etiqueta DIAN'],
-        cuñetesPacked: req.technicalCalculation?.totalCuñetes || 1,
-        galonesPacked: req.technicalCalculation?.remainderGalons || 2,
-        weightKg: 85,
-        qualitySealAttached: true,
-        qrInspectionCode: `QR-PTC-PACK-${req.requestCode}`,
-        status: 'empacado_listo',
-        notes: 'Alistamiento completado en bodega CEDI. Embalaje listo para despacho.',
-      },
-    };
-    if (onUpdateRequest) {
-      onUpdateRequest(updated);
-    }
-    sendOrderPackedEmail(updated).catch(console.error);
-    setOrderSuccessBanner(`📦 ¡Pedido ${req.requestCode} marcado como EMPACADO! Se envió la notificación a ${req.clientEmail || currentUser.email}.`);
-  };
-
-  const handleSimulateInTransit = (req: PaintRequest) => {
-    const now = new Date();
-    const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} Hoy`;
-    const updated: PaintRequest = {
-      ...req,
-      status: 'servicio_despacho',
-      serviceLogistics: {
-        ...req.serviceLogistics,
-        logisticsStatus: 'En ruta',
-        estimatedDeliveryDate: '2026-08-30',
-        estimatedDays: 1,
-      },
-      deliveryDetails: {
-        driverId: 'usr-con-1',
-        driverName: 'Wilson Cañas',
-        driverPhone: '+57 312 333 4455',
-        vehiclePlate: 'WTL-582',
-        vehicleType: 'Camión Turbo FTR 4.5T Pintuco Express',
-        deliveryAddress: req.deliveryAddress || `${req.clientName}, ${req.city}`,
-        routeStatus: 'en_ruta',
-        departedAt: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
-        currentLocation: 'En ruta hacia destino · Monitoreo GPS Activo',
-        estimatedArrival: `${timeStr} (En tránsito)`,
-      },
-    };
-    if (onUpdateRequest) {
-      onUpdateRequest(updated);
-    }
-    sendOrderInTransitEmail(updated).catch(console.error);
-    setOrderSuccessBanner(`🚚 ¡Pedido ${req.requestCode} en camino en el VEHÍCULO! Se envió el correo con placa WTL-582 y conductor.`);
-  };
-
-  const handleSimulateDelivered = (req: PaintRequest) => {
-    const now = new Date();
-    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const updated: PaintRequest = {
-      ...req,
-      status: 'calidad_garantia',
-      serviceLogistics: {
-        ...req.serviceLogistics,
-        logisticsStatus: 'Entregado',
-        estimatedDeliveryDate: timeStr,
-      },
-      deliveryDetails: {
-        ...req.deliveryDetails,
-        driverId: req.deliveryDetails?.driverId || 'usr-con-1',
-        driverName: req.deliveryDetails?.driverName || 'Wilson Cañas',
-        driverPhone: req.deliveryDetails?.driverPhone || '+57 312 333 4455',
-        vehiclePlate: req.deliveryDetails?.vehiclePlate || 'WTL-582',
-        vehicleType: 'Camión Turbo FTR 4.5T Pintuco Express',
-        deliveryAddress: req.deliveryAddress || `${req.clientName}, ${req.city}`,
-        routeStatus: 'entregado',
-        deliveredAt: timeStr,
-        receivedByName: req.clientName,
-        receivedByDoc: 'C.C. 1.020.334.890',
-        deliveryNotes: 'Entrega finalizada a entera satisfacción en obra con garantía legal.',
-        currentLocation: 'Entrega completada · Obra conforme',
-      },
-      qualityCertificate: req.qualityCertificate || {
-        certificateId: `GAR-PTC-${Math.floor(Math.random() * 90000 + 10000)}`,
-        inspectorName: 'Ing. Andrea Valencia Q.A.',
-        adhesionTest: 'Excelente',
-        substrateMoisture: 4.0,
-        dryFilmThicknessMils: 4.5,
-        warrantyIssuedDate: timeStr.split(' ')[0],
-        warrantyExpirationDate: `${now.getFullYear() + (req.technicalCalculation?.warrantyDurationYears || 5)}-08-30`,
-      },
-    };
-    if (onUpdateRequest) {
-      onUpdateRequest(updated);
-    }
-    sendOrderDeliveredEmail(updated).catch(console.error);
-    setOrderSuccessBanner(`✅ ¡Pedido ${req.requestCode} ENTREGADO! Se emitió la garantía y se envió la confirmación final al correo.`);
-  };
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<WarehouseInventoryItem | null>(() => {
     if (initialPendingData?.catalogItem) return initialPendingData.catalogItem;
     return null;
   });
 
-  // Estado del Carrito Multi-Ítem (Permite pedir varios productos en una sola orden)
-  const [cartItems, setCartItems] = useState<Array<{
+  // Estado del Carrito Multi-Ítem (Sincronizado con la barra de navegación global)
+  const [internalCartItems, setInternalCartItems] = useState<Array<{
     id: string;
     item: WarehouseInventoryItem;
     quantity: number;
@@ -236,11 +197,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     totalCostCOP: number;
   }>>(() => {
     try {
-      const saved = localStorage.getItem('colorlink_client_cart');
+      const saved = localStorage.getItem('colorlink_cart_items') || localStorage.getItem('colorlink_client_cart');
       if (saved) return JSON.parse(saved);
     } catch {}
     return [];
   });
+
+  const cartItems = propsCartItems || internalCartItems;
+  const setCartItems = propsCartItems ? (() => {}) as any : setInternalCartItems;
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cartDeliveryAddress, setCartDeliveryAddress] = useState<string>(
     currentUser.city ? `Calle 45 # 22-80, ${currentUser.city}` : 'Dirección de obra principal'
@@ -499,70 +463,94 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     format: 'galon' | 'cuñete' | 'cuarto' | 'unidad',
     color?: { name: string; hex: string }
   ) => {
-    const isPaint = isPaintProduct(item);
-    let unitPrice = item.unitPrice || item.pricePerGalon || (isPaint ? 115000 : 28000);
-    if (isPaint && format === 'cuñete') {
-      unitPrice = Math.round(unitPrice * 5 * 0.92);
-    }
-    const totalCostCOP = unitPrice * quantity;
-
-    setCartItems((prev) => {
-      const existingIdx = prev.findIndex(
-        (ci) => ci.item.sku === item.sku && ci.format === format && (ci.selectedColor?.name === color?.name || !color)
-      );
-      if (existingIdx >= 0) {
-        const next = [...prev];
-        const updatedQty = next[existingIdx].quantity + quantity;
-        next[existingIdx] = {
-          ...next[existingIdx],
-          quantity: updatedQty,
-          totalCostCOP: next[existingIdx].unitPrice * updatedQty,
-        };
-        return next;
+    if (onAddToCart) {
+      onAddToCart(item, quantity, format, color);
+    } else {
+      const isPaint = isPaintProduct(item);
+      let unitPrice = item.unitPrice || item.pricePerGalon || (isPaint ? 115000 : 28000);
+      if (isPaint && format === 'cuñete') {
+        unitPrice = Math.round(unitPrice * 5 * 0.92);
       }
-      return [
-        ...prev,
-        {
-          id: `cart-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          item,
-          quantity,
-          format,
-          selectedColor: color,
-          unitPrice,
-          totalCostCOP,
-        },
-      ];
-    });
+      const totalCostCOP = unitPrice * quantity;
+
+      setInternalCartItems((prev) => {
+        const existingIdx = prev.findIndex(
+          (ci) => ci.item.sku === item.sku && ci.format === format && (ci.selectedColor?.name === color?.name || !color)
+        );
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          const updatedQty = next[existingIdx].quantity + quantity;
+          next[existingIdx] = {
+            ...next[existingIdx],
+            quantity: updatedQty,
+            totalCostCOP: next[existingIdx].unitPrice * updatedQty,
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            id: `cart-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            item,
+            quantity,
+            format,
+            selectedColor: color,
+            unitPrice,
+            totalCostCOP,
+          },
+        ];
+      });
+    }
 
     setCartToast(`✅ "${item.productName}" (${quantity} ${format === 'cuñete' ? 'Cuñete(s)' : format === 'galon' ? 'Galón(es)' : 'und'}) agregado a tu pedido.`);
     setTimeout(() => setCartToast(null), 3500);
   };
 
   const handleUpdateCartQty = (cartId: string, delta: number) => {
-    setCartItems((prev) =>
-      prev
-        .map((ci) => {
-          if (ci.id === cartId) {
-            const newQty = ci.quantity + delta;
-            if (newQty <= 0) return null;
-            return {
-              ...ci,
-              quantity: newQty,
-              totalCostCOP: ci.unitPrice * newQty,
-            };
-          }
-          return ci;
-        })
-        .filter(Boolean) as any[]
-    );
+    if (propsUpdateQty) {
+      propsUpdateQty(cartId, delta);
+    } else {
+      setInternalCartItems((prev) =>
+        prev
+          .map((ci) => {
+            if (ci.id === cartId) {
+              const newQty = ci.quantity + delta;
+              if (newQty <= 0) return null;
+              return {
+                ...ci,
+                quantity: newQty,
+                totalCostCOP: ci.unitPrice * newQty,
+              };
+            }
+            return ci;
+          })
+          .filter(Boolean) as any[]
+      );
+    }
   };
 
   const handleRemoveFromCart = (cartId: string) => {
-    setCartItems((prev) => prev.filter((ci) => ci.id !== cartId));
+    if (propsRemoveItem) {
+      propsRemoveItem(cartId);
+    } else {
+      setInternalCartItems((prev) => prev.filter((ci) => ci.id !== cartId));
+    }
   };
 
   const handleClearCart = () => {
-    setCartItems([]);
+    if (propsClearCart) {
+      propsClearCart();
+    } else {
+      setInternalCartItems([]);
+    }
+  };
+
+  const handleOpenCartModal = () => {
+    if (onOpenCart) {
+      onOpenCart();
+    } else {
+      setIsCartOpen(true);
+    }
   };
 
   const handleConfirmCartOrder = () => {
@@ -732,6 +720,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       setSelectedCatalogItem(initialPendingData.catalogItem);
       setActiveTab('nueva_solicitud');
     } else if (initialPendingData) {
+      setSelectedCatalogItem(null);
       setActiveTab('nueva_solicitud');
     }
   }, [initialPendingData]);
@@ -817,118 +806,103 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
 
-      {/* Banner de Bienvenida del Cliente - Armonía Blancos y Azules */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white rounded-2xl p-6 shadow-md border border-blue-800/40 relative overflow-hidden">
-        {/* Glow sutil azul celeste */}
-        <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+      {/* Banner Superior Corporativo de Gestión de Proyectos */}
+      <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-7 shadow-xs border border-slate-800 relative overflow-hidden">
+        {/* Glow sutil institucional */}
+        <div className="absolute -right-12 -bottom-12 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-sky-400 text-white flex items-center justify-center font-bold shadow-md">
+        <div className="flex flex-wrap items-center justify-between gap-5 relative z-10">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-600/90 text-white flex items-center justify-center font-bold shadow-xs shrink-0 border border-blue-400/30">
               <Building className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-sky-400/20 text-sky-200 border border-sky-400/30 font-bold">
-                  PORTAL CLIENTE · COLORLINK
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-400/30 font-semibold">
+                  PORTAL CLIENTE · CEDI {clientCity.toUpperCase()}
                 </span>
-                <span className="text-xs text-blue-200/80 font-medium">· Sede {currentUser.city}</span>
+                <span className="text-xs text-slate-400 font-medium">· Trazabilidad & Formulación Oficial</span>
               </div>
-              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1">
-                ¡Hola, {currentUser.name}!
+              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1 tracking-tight">
+                Bienvenido, {currentUser.name}
               </h1>
-              <p className="text-xs text-blue-100/80">
-                Pinturas formuladas con tecnología de punta y despacho oficial desde centros de distribución CEDI.
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed mt-0.5">
+                Plataforma de despacho oficial Pintuco. Monitorea tus pedidos en tiempo real o formula recubrimientos técnicos con certificación de calidad.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={onOpenCalculator}
-              className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl text-xs flex items-center gap-1.5 transition-colors border border-white/20 cursor-pointer"
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700/80 text-slate-100 font-medium rounded-lg text-xs flex items-center gap-1.5 transition-colors border border-slate-700 cursor-pointer shadow-2xs"
             >
-              <Sliders className="w-4 h-4 text-sky-300" />
-              Calculadora Técnica
-            </button>
-            <button
-              type="button"
-              onClick={onOpenAiAssistant}
-              className="px-3.5 py-2 bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-slate-950" />
-              Asesor IA ColorLink
+              <Sliders className="w-3.5 h-3.5 text-blue-400" />
+              <span>Calculadora m²</span>
             </button>
           </div>
         </div>
 
-        {/* Selector de Pestañas: Mis Pedidos vs Nueva Solicitud vs Catálogo de Inventario */}
-        <div className="mt-5 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-3 relative z-10">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* Selector de Pestañas: Mis Pedidos, Nueva Solicitud, Catálogo, Accesos, Correos */}
+        <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 relative z-10">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-slate-800">
             <button
               type="button"
               onClick={() => setActiveTab('mis_pedidos')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 activeTab === 'mis_pedidos'
-                  ? 'bg-white text-blue-950 font-bold shadow-sm'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Layers className="w-4 h-4" />
-              <span>Mis Pedidos & Seguimiento ({clientRequests.length})</span>
+              <Layers className="w-3.5 h-3.5" />
+              <span>Mis Pedidos & Seguimiento</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${activeTab === 'mis_pedidos' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {clientRequests.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('nueva_solicitud')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 activeTab === 'nueva_solicitud'
-                  ? 'bg-white text-blue-950 font-bold shadow-sm'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <PlusCircle className="w-4 h-4" />
-              <span>Nueva Solicitud / Cotización</span>
+              <Palette className="w-3.5 h-3.5 text-amber-400" />
+              <span>Crear Pintura / Nueva Solicitud</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('catalogo_inventario')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 activeTab === 'catalogo_inventario'
-                  ? 'bg-white text-blue-950 font-bold shadow-sm'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Boxes className="w-4 h-4" />
-              <span>Catálogo & Stock CEDI {clientCity} ({clientInventory.length})</span>
+              <Boxes className="w-3.5 h-3.5" />
+              <span>Catálogo CEDI {clientCity}</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${activeTab === 'catalogo_inventario' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {clientInventory.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('mis_accesos')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 activeTab === 'mis_accesos'
-                  ? 'bg-white text-blue-950 font-bold shadow-sm'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Mis Accesos Habilitados</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('mis_correos')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'mis_correos'
-                  ? 'bg-white text-blue-950 font-bold shadow-sm'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
-              }`}
-            >
-              <Mail className="w-4 h-4" />
-              <span>Buzón de Notificaciones ({userEmails.length})</span>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Mis Accesos</span>
             </button>
           </div>
         </div>
@@ -942,6 +916,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             inventoryList={clientInventory}
             selectedCatalogItem={selectedCatalogItem}
             initialPendingData={initialPendingData}
+            onClearInitialPendingData={onClearInitialPendingData}
             onClearSelectedCatalogItem={() => {
               setSelectedCatalogItem(null);
               if (onClearInitialPendingData) onClearInitialPendingData();
@@ -954,6 +929,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             onOpenAiAssistant={onOpenAiAssistant}
             onLogout={onLogout}
             onViewTransversal={onViewTransversal}
+            onAddToCart={handleAddToCart}
+            onOpenCart={handleOpenCartModal}
+            onNavigateCatalog={() => setActiveTab('catalogo_inventario')}
           />
         </div>
       ) : activeTab === 'catalogo_inventario' ? (
@@ -983,15 +961,15 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsCartOpen(true)}
+                  onClick={handleOpenCartModal}
                   className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer ${
                     cartItems.length > 0
-                      ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-black ring-2 ring-amber-300/60'
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white font-bold ring-2 ring-blue-400/40'
                       : 'bg-white/10 hover:bg-white/20 text-white'
                   }`}
                   id="btn-open-cart-header"
                 >
-                  <ShoppingCart className="w-4 h-4 text-slate-950" />
+                  <ShoppingCart className="w-4 h-4 text-white" />
                   <span>Mi Pedido ({cartItems.length} {cartItems.length === 1 ? 'ítem' : 'ítems'})</span>
                   {cartItems.length > 0 && (
                     <span className="px-1.5 py-0.5 rounded-full bg-slate-950 text-amber-300 text-[10px] font-mono font-bold">
@@ -1757,8 +1735,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsCartOpen(true)}
-                  className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                  onClick={handleOpenCartModal}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
                   id="btn-view-cart-floating"
                 >
                   <span>Ver Pedido y Finalizar</span>
@@ -2230,6 +2208,256 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             </div>
           </div>
         </div>
+      ) : activeTab === 'mis_correos' ? (
+        <div className="space-y-6" id="client-email-inbox-section">
+          {/* Header del Buzón Oficial de Notificaciones al Correo */}
+          <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-blue-900 text-white rounded-2xl p-6 sm:p-8 shadow-md border border-blue-400/30 relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative z-10">
+              <div className="flex items-start sm:items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-600/30 text-sky-300 border border-blue-400/30 flex items-center justify-center shrink-0 shadow-xs">
+                  <Mail className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded bg-blue-500/20 text-sky-200 border border-blue-400/30">
+                      BUZÓN OFICIAL COLORLINK · ENLACE DIRECTO A TU BANDEJA
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Canal Verificado
+                    </span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-bold font-['Space_Grotesk'] text-white">
+                    Notificaciones y Mensajes al Correo Electrónico
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-300 mt-1">
+                    Destinatario Oficial: <strong className="font-mono text-sky-300">{currentUser.email}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Botones de Acceso Rápido a Gmail Web y Outlook Web */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.open('https://mail.google.com', '_blank')}
+                  className="px-3.5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                  title="Abrir tu bandeja de entrada en Gmail Web"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Ir a Gmail Web</span>
+                  <ExternalLink className="w-3 h-3 ml-0.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.open('https://outlook.live.com', '_blank')}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                  title="Abrir tu bandeja de entrada en Outlook"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Ir a Outlook Web</span>
+                  <ExternalLink className="w-3 h-3 ml-0.5" />
+                </button>
+                {onOpenEmailInbox && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenEmailInbox()}
+                    className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl text-xs flex items-center gap-1.5 border border-white/20 transition-all cursor-pointer"
+                    title="Abrir modal de lectura completa"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-sky-300" />
+                    <span>Auditoría de Buzón</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Total Mensajes Registrados</span>
+                <span className="font-bold text-white text-base block mt-0.5">{userEmails.length} Notificaciones</span>
+              </div>
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Titular Registrado</span>
+                <span className="font-semibold text-white truncate block mt-0.5">{currentUser.name}</span>
+              </div>
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Dirección de Envío</span>
+                <span className="font-mono text-sky-300 truncate block mt-0.5">{currentUser.email}</span>
+              </div>
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Seguridad del Canal</span>
+                <span className="font-semibold text-emerald-300 block mt-0.5">TLS / SSL Cifrado 256-bit</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Listado de Correos Enviados al Cliente */}
+          {userEmails.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-blue-200 p-8 sm:p-12 text-center shadow-xs space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 border border-blue-200 mx-auto flex items-center justify-center">
+                <Mail className="w-8 h-8" />
+              </div>
+              <div className="max-w-md mx-auto space-y-2">
+                <h3 className="text-base font-bold text-slate-900">
+                  Aún no se registran correos para {currentUser.email}
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Cada vez que te registres, formules un pedido o tu orden avance (empaque en bodega CEDI, en ruta con el conductor y entrega finalizada con garantía), los mensajes oficiales quedarán archivados aquí con enlaces para abrirlos en tu correo electrónico.
+                </p>
+              </div>
+              <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('nueva_solicitud')}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>+ Crear Nueva Solicitud de Pedido</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900 font-['Space_Grotesk'] flex items-center gap-2">
+                  <span>Mensajes Oficiales Despachados</span>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
+                    {userEmails.length}
+                  </span>
+                </h3>
+                <span className="text-xs text-slate-500">
+                  Haz clic en cualquier mensaje para abrirlo o redactarlo en Gmail Web
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {userEmails.map((email) => {
+                  const plainText = buildEmailPlainText(email);
+                  const isCopied = copiedEmailId === email.id;
+
+                  const getBadge = () => {
+                    switch (email.category) {
+                      case 'bienvenida':
+                        return { label: 'Bienvenida & Credenciales', bg: 'bg-sky-100 text-blue-900 border-sky-300', icon: <Sparkles className="w-3.5 h-3.5 text-blue-600" /> };
+                      case 'orden_creada':
+                        return { label: 'Orden Registrada', bg: 'bg-indigo-100 text-indigo-900 border-indigo-300', icon: <Clock className="w-3.5 h-3.5 text-indigo-600" /> };
+                      case 'empaque':
+                        return { label: 'Empacado en Bodega CEDI', bg: 'bg-amber-100 text-amber-900 border-amber-300', icon: <Package className="w-3.5 h-3.5 text-amber-700" /> };
+                      case 'transporte':
+                        return { label: 'En Ruta con Conductor', bg: 'bg-blue-100 text-blue-900 border-blue-300', icon: <Truck className="w-3.5 h-3.5 text-blue-700" /> };
+                      case 'entrega':
+                        return { label: 'Entregado & Garantía 5 Años', bg: 'bg-emerald-100 text-emerald-900 border-emerald-300', icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" /> };
+                      default:
+                        return { label: 'Notificación Oficial', bg: 'bg-slate-100 text-slate-800 border-slate-300', icon: <Mail className="w-3.5 h-3.5 text-slate-700" /> };
+                    }
+                  };
+
+                  const badge = getBadge();
+
+                  return (
+                    <div
+                      key={email.id}
+                      className="bg-white rounded-2xl border-2 border-slate-200/90 hover:border-blue-300 p-5 shadow-xs transition-all space-y-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center shrink-0 shadow-2xs mt-0.5">
+                            {badge.icon}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex items-center gap-1 ${badge.bg}`}>
+                                {badge.label}
+                              </span>
+                              {email.requestCode && (
+                                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                  {email.requestCode}
+                                </span>
+                              )}
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {email.sentAt}
+                              </span>
+                            </div>
+                            <h4 className="text-sm font-bold text-slate-900 mt-1 leading-snug">
+                              {email.subject}
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Enviado al correo
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        {email.previewText}
+                      </p>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+                        <span className="text-slate-500 font-mono text-[11px]">
+                          Para: <strong className="text-blue-700">{email.toEmail}</strong> ({email.toName})
+                        </span>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`ASUNTO: ${email.subject}\n\n${plainText}`);
+                              setCopiedEmailId(email.id);
+                              setTimeout(() => setCopiedEmailId(null), 2000);
+                            }}
+                            className="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Copiar texto oficial del correo"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>{isCopied ? '¡Copiado!' : 'Copiar Texto'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openInGmail(email)}
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                            title="Abrir este correo en Gmail Web pre-llenado"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Abrir en Gmail Web</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openInOutlook(email)}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                            title="Abrir en Outlook Web"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Outlook</span>
+                          </button>
+
+                          {onOpenEmailInbox && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenEmailInbox(email.id)}
+                              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                              title="Ver diseño HTML oficial en modal"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-teal-400" />
+                              <span>Ver Correo Completo</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       ) : clientRequests.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-8 sm:p-12 text-center shadow-xs space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-teal-50 text-teal-700 border border-teal-200 mx-auto flex items-center justify-center">
@@ -2370,6 +2598,28 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                                 : (req.technicalCalculation?.recommendedProduct?.name?.split('®')[0] || 'Viniltex')}
                             </span>
                           </div>
+
+                          {/* Botón Mensajes Directos con el Conductor */}
+                          <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReqId(req.id);
+                                setChatReqId(req.id);
+                              }}
+                              className="w-full py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              title="Escribir o contestar a tu conductor en tiempo real"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>💬 Mensajes con Conductor</span>
+                              {req.chatMessages && req.chatMessages.length > 0 && (
+                                <span className="ml-1 px-1.5 py-0.2 bg-[#25D366] text-slate-950 text-[10px] font-mono font-bold rounded-full">
+                                  {req.chatMessages.length}
+                                </span>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2402,16 +2652,36 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Botón Mensajes para contestar al conductor */}
+                    <button
+                      type="button"
+                      onClick={() => setChatReqId(selectedRequest.id)}
+                      className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebd5b] text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md border-2 border-emerald-950 cursor-pointer"
+                      title="Abrir mensajes en tiempo real con tu conductor"
+                    >
+                      <MessageSquare className="w-4 h-4 text-slate-950" />
+                      <span>💬 Mensajes con Conductor</span>
+                      {selectedRequest.chatMessages && selectedRequest.chatMessages.length > 0 && (
+                        <span className="ml-1 px-1.5 py-0.2 bg-slate-950 text-white text-[10px] font-mono font-bold rounded-full">
+                          {selectedRequest.chatMessages.length}
+                        </span>
+                      )}
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => {
                         if (onOpenInvoice) onOpenInvoice(selectedRequest);
                         else setSelectedInvoice(selectedRequest);
                       }}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-navy-900 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-xs"
+                      style={{ color: '#000000' }}
+                      className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-black font-black rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-md border-2 border-black cursor-pointer"
+                      title="Descargar Factura Electrónica en PDF"
                     >
-                      <Receipt className="w-4 h-4 text-teal-600" />
-                      📄 Descargar Factura PDF
+                      <Receipt className="w-4 h-4 text-black" style={{ color: '#000000' }} />
+                      <span style={{ color: '#000000' }} className="text-black font-black">
+                        📄 Descargar Factura PDF
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -2549,27 +2819,83 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   </div>
                 )}
 
-                {/* Línea de Tiempo Conectada en Tiempo Real (Los 5 Pilares) */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-bold font-mono text-navy-900 uppercase tracking-wider">
-                    Línea de Tiempo del Pedido (Ecosistema Pintuco 360°)
-                  </h4>
+                {/* Flujo Único de Seguimiento & Trazabilidad del Pedido */}
+                <div className="space-y-4 pt-2">
+                  {(() => {
+                    // Calcular el progreso actual en porcentaje del flujo único
+                    const isDelivered = selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado';
+                    const isInTransit = selectedRequest.deliveryDetails?.routeStatus === 'en_ruta';
+                    const isPacked = selectedRequest.packagingDetails?.status === 'empacado_listo';
+                    const stepNum = isDelivered ? 5 : isInTransit ? 4 : isPacked ? 3 : 2;
+                    const percent = stepNum * 20;
+
+                    return (
+                      <>
+                        <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-200">
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 flex items-center justify-center shrink-0 shadow-2xs">
+                              <Truck className="w-5 h-5 text-blue-700" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 font-['Space_Grotesk'] uppercase tracking-wider">
+                                Flujo Único de Seguimiento & Trazabilidad
+                              </h4>
+                              <p className="text-[11px] text-slate-500">
+                                Ciclo integral en tiempo real: desde formulación hasta entrega certificada
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-lg">
+                              Paso {stepNum} de 5 ({percent}%)
+                            </span>
+                            <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-bold flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                              En Monitoreo
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Barra de Progreso Dinámica e Interactiva */}
+                        <div className="space-y-1.5 p-3 rounded-xl bg-slate-50/80 border border-slate-200">
+                          <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-600">
+                            <span className="font-bold text-slate-900">Avance de Orden:</span>
+                            <span className="font-bold text-blue-700">{percent}% Completado</span>
+                          </div>
+                          <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden p-0.5 shadow-inner">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-all duration-700 ease-out shadow-xs"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <div className="grid grid-cols-5 text-[9.5px] font-mono text-slate-400 pt-0.5 text-center">
+                            <span className={stepNum >= 1 ? 'font-bold text-blue-900' : ''}>1. Registro</span>
+                            <span className={stepNum >= 2 ? 'font-bold text-blue-900' : ''}>2. Formulado</span>
+                            <span className={stepNum >= 3 ? 'font-bold text-amber-800' : ''}>3. Empacado</span>
+                            <span className={stepNum >= 4 ? 'font-bold text-blue-800' : ''}>4. En Camino</span>
+                            <span className={stepNum >= 5 ? 'font-bold text-emerald-800' : ''}>5. Entregado</span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
                     {/* Paso 1: Solicitud */}
-                    <div className="relative">
-                      <div className="absolute -left-6 top-0 w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-bold shadow-xs">
+                    <div className="relative group/step">
+                      <div className="absolute -left-6 top-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shadow-xs transition-transform group-hover/step:scale-110">
                         ✓
                       </div>
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs transition-all hover:border-slate-300 hover:shadow-2xs">
                         <div className="flex items-center justify-between font-bold text-navy-900 mb-1">
-                          <span>
+                          <span className="flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-blue-700" />
                             {selectedRequest.orderItemType === 'material'
                               ? '1. Pedido de Material Recibido & Registrado'
                               : '1. Solicitud Recibida & Registrada'}
                           </span>
-                          <span className="font-mono text-[10px] text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                            COMPLETADO
+                          <span className="font-mono text-[10px] text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                            REGISTRADO ✓
                           </span>
                         </div>
                         <p className="text-slate-700">
@@ -2581,33 +2907,34 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     </div>
 
                     {/* Paso 2: Formulación Técnica / Aprobación de Material */}
-                    <div className="relative">
-                      <div className="absolute -left-6 top-0 w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-bold shadow-xs">
+                    <div className="relative group/step">
+                      <div className="absolute -left-6 top-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shadow-xs transition-transform group-hover/step:scale-110">
                         ✓
                       </div>
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1 transition-all hover:border-slate-300 hover:shadow-2xs">
                         <div className="flex items-center justify-between font-bold text-navy-900">
-                          <span>
+                          <span className="flex items-center gap-1.5">
+                            <Palette className="w-3.5 h-3.5 text-blue-700" />
                             {selectedRequest.orderItemType === 'material'
                               ? '2. Verificación de Lote & Alistamiento en CEDI'
                               : '2. Formulación & Especificación Técnica'}
                           </span>
-                          <span className="font-mono text-[10px] text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                            {selectedRequest.orderItemType === 'material' ? 'VERIFICADO' : 'FORMULADO'}
+                          <span className="font-mono text-[10px] text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                            {selectedRequest.orderItemType === 'material' ? 'VERIFICADO ✓' : 'FORMULADO ✓'}
                           </span>
                         </div>
                         <p className="text-slate-700">
                           {selectedRequest.orderItemType === 'material'
-                            ? `Ítem de inventario verificado en bodega ${selectedRequest.inventoryAllocation?.warehouseName || 'CEDI Principal'}. Despacho de ${selectedRequest.materialQuantity || 1} unidades con control de calidad de empaque.`
+                            ? `Ítem de inventario verificado en bodega ${selectedRequest.inventoryAllocation?.warehouseName || 'CEDI Principal'}. Despacho de ${selectedRequest.materialQuantity || 1} unidades con control de calidad.`
                             : `Sistema: ${(selectedRequest.surfaceType || 'MAMPOSTERIA').toUpperCase()} · ${selectedRequest.technicalCalculation?.totalGallonsNeeded ? selectedRequest.technicalCalculation.totalGallonsNeeded.toFixed(1) : (selectedRequest.technicalCalculation?.totalGalons || 2)} Galones (${selectedRequest.technicalCalculation?.buckets5Gal || selectedRequest.technicalCalculation?.totalCuñetes || 1} Cuñetes de 5 Gal).`}
                         </p>
                       </div>
                     </div>
 
                     {/* Paso 3: Empaque y CEDI */}
-                    <div className="relative">
+                    <div className="relative group/step">
                       <div
-                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs ${
+                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs transition-transform group-hover/step:scale-110 ${
                           selectedRequest.packagingDetails?.status === 'empacado_listo'
                             ? 'bg-amber-600 text-white'
                             : 'bg-slate-300 text-slate-700'
@@ -2616,21 +2943,25 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         {selectedRequest.packagingDetails?.status === 'empacado_listo' ? '✓' : '3'}
                       </div>
                       <div
-                        className={`p-3 rounded-xl border text-xs ${
+                        className={`p-3 rounded-xl border text-xs transition-all ${
                           selectedRequest.packagingDetails?.status === 'empacado_listo'
-                            ? 'bg-amber-50/60 border-amber-300'
+                            ? 'bg-amber-50/70 border-amber-300 shadow-xs'
                             : 'bg-slate-50 border-slate-200'
                         }`}
                       >
                         <div className="flex items-center justify-between font-bold text-navy-900 mb-1">
                           <span className="flex items-center gap-1.5">
                             <Boxes className="w-3.5 h-3.5 text-amber-700" />
-                            3. Alistamiento en Bodega CEDI
+                            3. Alistamiento & Empaque en Bodega CEDI
                           </span>
-                          <span className="font-mono text-[10px] text-amber-800">
+                          <span className={`font-mono text-[10px] px-2 py-0.5 rounded border font-bold ${
+                            selectedRequest.packagingDetails?.status === 'empacado_listo'
+                              ? 'text-amber-900 bg-amber-100 border-amber-300'
+                              : 'text-slate-500 bg-slate-100 border-slate-200'
+                          }`}>
                             {selectedRequest.packagingDetails?.status === 'empacado_listo'
-                              ? 'EMPACADO & LISTO'
-                              : 'EN ALISTAMIENTO'}
+                              ? 'EMPACADO & LISTO ✓'
+                              : 'PENDIENTE'}
                           </span>
                         </div>
                         <p className="text-slate-700">
@@ -2642,12 +2973,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       </div>
                     </div>
 
-                    {/* Paso 4: Despacho & Conductor (Rol Conductor) */}
-                    <div className="relative">
+                    {/* Paso 4: Despacho & Conductor */}
+                    <div className="relative group/step">
                       <div
-                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs ${
+                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs transition-transform group-hover/step:scale-110 ${
                           selectedRequest.deliveryDetails?.routeStatus === 'entregado'
-                            ? 'bg-teal-600 text-white'
+                            ? 'bg-emerald-600 text-white'
                             : selectedRequest.deliveryDetails?.routeStatus === 'en_ruta'
                             ? 'bg-blue-600 text-white animate-pulse'
                             : 'bg-slate-300 text-slate-700'
@@ -2656,9 +2987,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         {selectedRequest.deliveryDetails?.routeStatus === 'entregado' ? '✓' : '4'}
                       </div>
                       <div
-                        className={`p-3 rounded-xl border text-xs ${
+                        className={`p-3 rounded-xl border text-xs transition-all ${
                           selectedRequest.deliveryDetails?.routeStatus === 'en_ruta'
-                            ? 'bg-blue-50/70 border-blue-300 shadow-xs'
+                            ? 'bg-blue-50/80 border-blue-400 shadow-md ring-1 ring-blue-300'
                             : selectedRequest.deliveryDetails?.routeStatus === 'entregado'
                             ? 'bg-emerald-50/60 border-emerald-300'
                             : 'bg-slate-50 border-slate-200'
@@ -2669,12 +3000,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             <Truck className="w-3.5 h-3.5 text-blue-700" />
                             4. Transporte & Conductor Pintuco Express
                           </span>
-                          <span className="font-mono text-[10px] text-blue-800">
-                            {selectedRequest.deliveryDetails?.routeStatus === 'entregado'
-                              ? 'ENTREGADO'
+                          <span className={`font-mono text-[10px] px-2 py-0.5 rounded border font-bold ${
+                            selectedRequest.deliveryDetails?.routeStatus === 'entregado'
+                              ? 'text-emerald-900 bg-emerald-100 border-emerald-300'
                               : selectedRequest.deliveryDetails?.routeStatus === 'en_ruta'
-                              ? '🚚 EN CAMINO (GPS ACTIVO)'
-                              : 'CARGADO EN MUELLE'}
+                              ? 'text-blue-900 bg-blue-100 border-blue-300 font-bold'
+                              : 'text-slate-500 bg-slate-100 border-slate-200'
+                          }`}>
+                            {selectedRequest.deliveryDetails?.routeStatus === 'entregado'
+                              ? 'ENTREGADO ✓'
+                              : selectedRequest.deliveryDetails?.routeStatus === 'en_ruta'
+                              ? '🚚 EN RUTA (GPS ACTIVO) ✓'
+                              : 'PENDIENTE'}
                           </span>
                         </div>
 
@@ -2687,227 +3024,309 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             Ubicación reportada: <em>"{selectedRequest.deliveryDetails?.currentLocation || 'En muelle CEDI Rionegro listo para salida'}"</em>
                           </p>
                         </div>
+
+                        {/* Botón Mensajes en vivo para contestar al conductor */}
+                        <div className="pt-2.5 mt-2.5 border-t border-blue-200/60 flex items-center justify-between flex-wrap gap-2">
+                          <span className="text-[11.5px] text-slate-600 font-medium">
+                            Coordinación directa de entrega en tiempo real:
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setChatReqId(selectedRequest.id)}
+                            className="px-3.5 py-1.5 bg-[#25D366] hover:bg-[#1ebd5b] text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                            title="Escribir o contestar a tu conductor en tiempo real"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-slate-950" />
+                            <span>💬 Mensajes con el Conductor</span>
+                            {selectedRequest.chatMessages && selectedRequest.chatMessages.length > 0 && (
+                              <span className="ml-1 px-1.5 py-0.2 bg-slate-950 text-white text-[10px] font-mono font-bold rounded-full">
+                                {selectedRequest.chatMessages.length}
+                              </span>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     {/* Paso 5: Garantía y Calidad */}
-                    <div className="relative">
+                    <div className="relative group/step">
                       <div
-                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs ${
+                        className={`absolute -left-6 top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-xs transition-transform group-hover/step:scale-110 ${
                           selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado'
                             ? 'bg-emerald-600 text-white'
                             : 'bg-slate-300 text-slate-700'
                         }`}
                       >
-                        {selectedRequest.status === 'calidad_garantia' ? '✓' : '5'}
+                        {selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado' ? '✓' : '5'}
                       </div>
-                      <div className="p-3 bg-emerald-50/70 border border-emerald-300 rounded-xl text-xs space-y-1.5">
+                      <div className={`p-3 rounded-xl border text-xs space-y-1.5 transition-all ${
+                        selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado'
+                          ? 'bg-emerald-50/80 border-emerald-400 shadow-xs'
+                          : 'bg-slate-50 border-slate-200'
+                      }`}>
                         <div className="flex items-center justify-between font-bold text-emerald-900">
                           <span className="flex items-center gap-1.5">
                             <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
                             5. Calidad Certificada & Garantía Pintuco S.A.
                           </span>
-                          <span className="font-mono text-[10px] text-emerald-800 font-bold">
-                            {selectedRequest.technicalCalculation?.warrantyDurationYears || 5} AÑOS
+                          <span className={`font-mono text-[10px] px-2 py-0.5 rounded border font-bold ${
+                            selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado'
+                              ? 'text-emerald-900 bg-emerald-100 border-emerald-300'
+                              : 'text-slate-500 bg-slate-100 border-slate-200'
+                          }`}>
+                            {selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado'
+                              ? 'ENTREGADO & CERTIFICADO ✓'
+                              : 'PENDIENTE'}
                           </span>
                         </div>
                         <p className="text-emerald-900">
-                          Certificado N°: <strong>{selectedRequest.qualityCertificate?.certificateId || 'GAR-PTC-99124'}</strong> · Inspector: {selectedRequest.qualityCertificate?.inspectorName || 'Ing. Andrea Valencia Q.A.'}
+                          Certificado N°: <strong>{selectedRequest.qualityCertificate?.certificateId || 'GAR-PTC-99124'}</strong> · Inspector: {selectedRequest.qualityCertificate?.inspectorName || 'Ing. Andrea Valencia Q.A.'} ({selectedRequest.technicalCalculation?.warrantyDurationYears || 5} Años)
                         </p>
                         <button
                           type="button"
                           onClick={() => onOpenCertificate(selectedRequest)}
-                          className="text-xs font-bold text-teal-800 hover:underline pt-1 block"
+                          className="text-xs font-bold text-blue-800 hover:text-blue-950 hover:underline pt-1 block cursor-pointer transition-colors"
                         >
                           Ver y Descargar Certificado Oficial →
                         </button>
                       </div>
                     </div>
+                  </div>
+                </div>
 
-                    {/* Trazabilidad & Notificaciones al Correo del Cliente */}
-                    <div className="mt-6 pt-5 border-t border-slate-200 space-y-3.5">
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-800 border border-teal-200 flex items-center justify-center shrink-0">
-                            <Mail className="w-4 h-4" />
+                {/* MÓDULO DE SEGUIMIENTO AL CORREO: CÓMO VA SU PEDIDO */}
+                {(() => {
+                  const targetEmail = selectedRequest.clientEmail || currentUser.email;
+                  const reqCode = selectedRequest.requestCode;
+                  
+                  // Buscar correos asociados a este pedido específico
+                  const orderEmails = userEmails.filter(
+                    (e) => (e.requestCode && e.requestCode === reqCode) || (e.subject && e.subject.includes(reqCode))
+                  );
+
+                  const isPacked = selectedRequest.packagingDetails?.status === 'empacado_listo';
+                  const isInTransit = selectedRequest.deliveryDetails?.routeStatus === 'en_ruta' || selectedRequest.status === 'servicio_despacho';
+                  const isDelivered = selectedRequest.deliveryDetails?.routeStatus === 'entregado' || selectedRequest.status === 'calidad_garantia';
+
+                  const emailOrderCreated = orderEmails.find((e) => e.category === 'orden_creada');
+                  const emailPacked = orderEmails.find((e) => e.category === 'empaque');
+                  const emailInTransit = orderEmails.find((e) => e.category === 'transporte');
+                  const emailDelivered = orderEmails.find((e) => e.category === 'entrega');
+
+                  return (
+                    <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-blue-50/90 via-sky-50/50 to-white border-2 border-blue-200/90 shadow-xs space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-blue-200">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                            <Mail className="w-5 h-5 text-white" />
                           </div>
                           <div>
-                            <h4 className="text-xs font-bold text-slate-900 font-['Space_Grotesk']">
-                              Notificaciones Enviadas a tu Correo ({selectedRequest.clientEmail || currentUser.email})
+                            <h4 className="text-sm font-bold text-blue-950 font-['Space_Grotesk']">
+                              Notificaciones Oficiales al Correo Electrónico
                             </h4>
-                            <p className="text-[11px] text-slate-500">
-                              Avisos automáticos de tu pedido cada vez que cambia de empaque a vehículo y entrega
+                            <p className="text-xs text-slate-600">
+                              Destinatario registrado: <strong className="font-mono text-blue-800">{targetEmail}</strong>
                             </p>
                           </div>
                         </div>
-                        <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-bold flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                          Despacho de Correo Activo
-                        </span>
-                      </div>
-
-                      {/* Fases del Pedido con Estado del Correo */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {/* 1. Orden Registrada */}
-                        <div className="p-3 rounded-xl border bg-slate-50 border-slate-200 flex items-start gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 text-xs font-bold">
-                            📋
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1 mb-0.5">
-                              <span className="font-bold text-slate-800 text-xs truncate">1. Orden Registrada</span>
-                              <span className="text-[9.5px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                                ENVIADO ✓
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-600 line-clamp-1">
-                              Confirmación inicial de pedido y resumen de cotización en COP.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* 2. Empaque en CEDI */}
-                        {(() => {
-                          const isPacked = selectedRequest.packagingDetails?.status === 'empacado_listo';
-                          return (
-                            <div className={`p-3 rounded-xl border flex items-start gap-2.5 ${
-                              isPacked ? 'bg-amber-50/70 border-amber-300' : 'bg-slate-50 border-slate-200 opacity-80'
-                            }`}>
-                              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 text-xs font-bold">
-                                📦
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-1 mb-0.5">
-                                  <span className="font-bold text-slate-800 text-xs truncate">2. En Empaque CEDI</span>
-                                  <span className={`text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                                    isPacked ? 'text-amber-900 bg-amber-100 border-amber-300' : 'text-slate-500 bg-slate-100 border-slate-200'
-                                  }`}>
-                                    {isPacked ? 'ENVIADO ✓' : 'PENDIENTE'}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-600 line-clamp-1">
-                                  {isPacked ? 'Aviso enviado con operario responsable y lote de fábrica.' : 'Se notificará al empaquetar en bodega.'}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* 3. En Vehículo / Transporte */}
-                        {(() => {
-                          const inTransit = selectedRequest.deliveryDetails?.routeStatus === 'en_ruta' || selectedRequest.status === 'servicio_despacho' || selectedRequest.deliveryDetails?.routeStatus === 'entregado';
-                          return (
-                            <div className={`p-3 rounded-xl border flex items-start gap-2.5 ${
-                              inTransit ? 'bg-blue-50/70 border-blue-300' : 'bg-slate-50 border-slate-200 opacity-80'
-                            }`}>
-                              <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center shrink-0 text-xs font-bold">
-                                🚚
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-1 mb-0.5">
-                                  <span className="font-bold text-slate-800 text-xs truncate">3. En Vehículo de Transporte</span>
-                                  <span className={`text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                                    inTransit ? 'text-blue-900 bg-blue-100 border-blue-300' : 'text-slate-500 bg-slate-100 border-slate-200'
-                                  }`}>
-                                    {inTransit ? 'ENVIADO ✓' : 'PENDIENTE'}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-600 line-clamp-1">
-                                  {inTransit ? 'Aviso enviado con placa WTL-582, chofer y GPS.' : 'Se notificará al salir en camión hacia tu obra.'}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* 4. Entregado */}
-                        {(() => {
-                          const isDelivered = selectedRequest.status === 'calidad_garantia' || selectedRequest.deliveryDetails?.routeStatus === 'entregado';
-                          return (
-                            <div className={`p-3 rounded-xl border flex items-start gap-2.5 ${
-                              isDelivered ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-80'
-                            }`}>
-                              <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 text-xs font-bold">
-                                ✅
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-1 mb-0.5">
-                                  <span className="font-bold text-slate-800 text-xs truncate">4. Entregado en Obra</span>
-                                  <span className={`text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                                    isDelivered ? 'text-emerald-900 bg-emerald-100 border-emerald-300' : 'text-slate-500 bg-slate-100 border-slate-200'
-                                  }`}>
-                                    {isDelivered ? 'ENVIADO ✓' : 'PENDIENTE'}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-600 line-clamp-1">
-                                  {isDelivered ? 'Aviso enviado con certificado oficial de garantía 5 años.' : 'Se notificará al firmar entrega en obra.'}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Simulador Interactivo de Notificaciones */}
-                      <div className="p-3.5 bg-gradient-to-r from-slate-50 via-teal-50/30 to-slate-50 border border-teal-200 rounded-xl space-y-2.5">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-teal-700" />
-                            <span>Simular Flujo y Enviar Notificaciones al Correo (Prueba Inmediata):</span>
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            Dispara sonido y correo al instante
-                          </span>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleSimulatePacked(selectedRequest)}
-                            className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold rounded-lg text-xs border border-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                            title="Simular paso a Empacado en bodega y enviar correo"
-                          >
-                            <span>📦 1. Simular Empacado</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleSimulateInTransit(selectedRequest)}
-                            className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-950 font-bold rounded-lg text-xs border border-blue-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                            title="Simular cargue en vehículo de transporte y enviar correo"
-                          >
-                            <span>🚚 2. Simular en Vehículo</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleSimulateDelivered(selectedRequest)}
-                            className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold rounded-lg text-xs border border-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                            title="Simular entrega en obra y emitir certificado de calidad"
-                          >
-                            <span>✅ 3. Simular Entregado</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onOpenEmailInbox) {
-                                onOpenEmailInbox();
-                              } else {
-                                setActiveTab('mis_correos');
-                              }
-                            }}
-                            className="ml-auto px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                            title="Abrir buzón completo de correos"
+                            onClick={() => window.open('https://mail.google.com', '_blank')}
+                            className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
+                            title="Abrir Gmail Web"
                           >
                             <Mail className="w-3.5 h-3.5" />
-                            <span>Ver Bandeja de Correos</span>
+                            <span>Abrir Gmail Web</span>
+                            <ExternalLink className="w-3 h-3" />
                           </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                        {/* 1. Orden Registrada */}
+                        <div className="p-3 bg-white rounded-xl border border-blue-200 space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                              1. Pedido Registrado
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
+                              DESPACHADO ✓
+                            </span>
+                          </div>
+                          <p className="text-[11.5px] text-slate-600 line-clamp-2">
+                            {emailOrderCreated?.previewText || `Confirmación de orden ${reqCode} con resumen de materiales y costo estimado enviada.`}
+                          </p>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                            <span className="text-[10.5px] text-slate-400 font-mono">
+                              {emailOrderCreated?.sentAt || selectedRequest.createdAt}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {emailOrderCreated && (
+                                <button
+                                  type="button"
+                                  onClick={() => openInGmail(emailOrderCreated)}
+                                  className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <span>Gmail</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </button>
+                              )}
+                              {onOpenEmailInbox && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenEmailInbox(emailOrderCreated?.id)}
+                                  className="text-[11px] font-bold text-blue-700 hover:underline cursor-pointer"
+                                >
+                                  Ver Correo →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Empacado en Bodega CEDI */}
+                        <div className={`p-3 rounded-xl border space-y-2 shadow-2xs ${isPacked ? 'bg-white border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <Package className={`w-4 h-4 ${isPacked ? 'text-amber-600' : 'text-slate-400'}`} />
+                              2. Empaque en Bodega CEDI
+                            </span>
+                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${isPacked ? 'bg-amber-100 text-amber-900' : 'bg-slate-200 text-slate-600'}`}>
+                              {isPacked ? 'DESPACHADO ✓' : 'EN ESPERA'}
+                            </span>
+                          </div>
+                          <p className="text-[11.5px] text-slate-600 line-clamp-2">
+                            {isPacked
+                              ? (emailPacked?.previewText || `Aviso de empaque e inspección de lote ${selectedRequest.inventoryAllocation?.batchNumber || 'LOTE-2026'} despachado.`)
+                              : 'Se despachará a tu correo cuando el operario en bodega complete el alistamiento y selle los envases.'}
+                          </p>
+                          {isPacked && (
+                            <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                              <span className="text-[10.5px] text-slate-400 font-mono">
+                                {emailPacked?.sentAt || selectedRequest.packagingDetails?.packedAt || 'Enviado'}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {emailPacked && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openInGmail(emailPacked)}
+                                    className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    <span>Gmail</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {onOpenEmailInbox && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenEmailInbox(emailPacked?.id)}
+                                    className="text-[11px] font-bold text-blue-700 hover:underline cursor-pointer"
+                                  >
+                                    Ver Correo →
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 3. En Ruta con Conductor */}
+                        <div className={`p-3 rounded-xl border space-y-2 shadow-2xs ${isInTransit || isDelivered ? 'bg-white border-blue-300' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <Truck className={`w-4 h-4 ${isInTransit || isDelivered ? 'text-blue-600' : 'text-slate-400'}`} />
+                              3. En Ruta / Conductor
+                            </span>
+                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${isInTransit || isDelivered ? 'bg-blue-100 text-blue-900' : 'bg-slate-200 text-slate-600'}`}>
+                              {isInTransit || isDelivered ? 'DESPACHADO ✓' : 'EN ESPERA'}
+                            </span>
+                          </div>
+                          <p className="text-[11.5px] text-slate-600 line-clamp-2">
+                            {isInTransit || isDelivered
+                              ? (emailInTransit?.previewText || `Aviso con conductor ${selectedRequest.deliveryDetails?.driverName || 'Wilson Cañas'} y placa ${selectedRequest.deliveryDetails?.vehiclePlate || 'WTL-582'} despachado.`)
+                              : 'Se despachará a tu correo tan pronto el conductor inicie la ruta desde el muelle del CEDI.'}
+                          </p>
+                          {(isInTransit || isDelivered) && (
+                            <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                              <span className="text-[10.5px] text-slate-400 font-mono">
+                                {emailInTransit?.sentAt || selectedRequest.deliveryDetails?.departedAt || 'Enviado'}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {emailInTransit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openInGmail(emailInTransit)}
+                                    className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    <span>Gmail</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {onOpenEmailInbox && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenEmailInbox(emailInTransit?.id)}
+                                    className="text-[11px] font-bold text-blue-700 hover:underline cursor-pointer"
+                                  >
+                                    Ver Correo →
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 4. Entregado en Obra & Garantía */}
+                        <div className={`p-3 rounded-xl border space-y-2 shadow-2xs ${isDelivered ? 'bg-white border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <ShieldCheck className={`w-4 h-4 ${isDelivered ? 'text-emerald-600' : 'text-slate-400'}`} />
+                              4. Entrega & Certificado 5 Años
+                            </span>
+                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${isDelivered ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-200 text-slate-600'}`}>
+                              {isDelivered ? 'DESPACHADO ✓' : 'EN ESPERA'}
+                            </span>
+                          </div>
+                          <p className="text-[11.5px] text-slate-600 line-clamp-2">
+                            {isDelivered
+                              ? (emailDelivered?.previewText || `Acta de entrega en obra y certificado de garantía 5 años N° ${selectedRequest.qualityCertificate?.certificateId || 'GAR-PTC'} despachados.`)
+                              : 'Se despachará a tu correo con el Certificado Oficial cuando el conductor confirme la entrega en obra.'}
+                          </p>
+                          {isDelivered && (
+                            <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                              <span className="text-[10.5px] text-slate-400 font-mono">
+                                {emailDelivered?.sentAt || selectedRequest.deliveryDetails?.deliveredAt || 'Enviado'}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {emailDelivered && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openInGmail(emailDelivered)}
+                                    className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    <span>Gmail</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {onOpenEmailInbox && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenEmailInbox(emailDelivered?.id)}
+                                    className="text-[11px] font-bold text-blue-700 hover:underline cursor-pointer"
+                                  >
+                                    Ver Correo →
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500">
@@ -2918,109 +3337,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
 
-      {/* PESTAÑA 5: BUZÓN DE CORREOS Y NOTIFICACIONES */}
-      {activeTab === 'mis_correos' && (
-        <div className="w-full bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6 animate-fade-in" id="client-email-inbox-tab">
-          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-blue-900 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                  BUZÓN OFICIAL COLORLINK
-                </span>
-                <span className="text-xs text-slate-500">· {userEmails.length} correos emitidos</span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold font-['Space_Grotesk'] text-slate-900 mt-1">
-                Notificaciones y Mensajes al Correo Electrónico
-              </h2>
-              <p className="text-xs text-slate-600">
-                Bandeja de entrada de felicitaciones, bienvenida y seguimiento de tus pedidos en empaque, transporte y entrega para <strong>{currentUser.email}</strong>.
-              </p>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <a
-                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-                  currentUser.email
-                )}&su=Consulta%20ColorLink`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Abrir tu cuenta de Gmail en una nueva pestaña"
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-                <span>Abrir Gmail Web</span>
-              </a>
-
-              <button
-                type="button"
-                onClick={() => onOpenEmailInbox && onOpenEmailInbox()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-              >
-                <Mail className="w-3.5 h-3.5" />
-                <span>Abrir en Visor Completo</span>
-              </button>
-            </div>
-          </div>
-
-          {userEmails.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 space-y-2">
-              <Mail className="w-12 h-12 mx-auto text-slate-300" />
-              <h3 className="text-sm font-bold text-slate-700">No hay correos registrados aún</h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Los mensajes de felicitaciones por registro y el estado de tu pedido en empaque, transporte y entrega se generarán automáticamente.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-3">
-                {userEmails.map((email) => (
-                  <div
-                    key={email.id}
-                    className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-blue-50/50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
-                  >
-                    <div className="space-y-1 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-200">
-                          {email.category.toUpperCase()}
-                        </span>
-                        <span className="text-xs font-bold text-slate-900">
-                          {email.subject}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono ml-auto sm:ml-0">
-                          {email.sentAt}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 line-clamp-2">
-                        {email.previewText}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openInGmail(email)}
-                        className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Ver en Gmail Web"
-                      >
-                        <ExternalLink className="w-3 h-3 text-red-600" />
-                        <span className="hidden md:inline">Gmail</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => onOpenEmailInbox && onOpenEmailInbox(email.id)}
-                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
-                      >
-                        <span>Leer Correo</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Modal de Factura Electrónica en PDF para el Cliente */}
       {selectedInvoice && (
@@ -3029,6 +3346,22 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           onClose={() => setSelectedInvoice(null)}
         />
       )}
+
+      {/* Modal / Ventana de Chat Wasap en Tiempo Real para el Cliente */}
+      {chatReqId && (() => {
+        const chatReq = requests.find((r) => r.id === chatReqId) || selectedRequest;
+        if (!chatReq) return null;
+        return (
+          <OrderChatModal
+            isOpen={Boolean(chatReqId)}
+            onClose={() => setChatReqId(null)}
+            request={chatReq}
+            currentUserRole="cliente"
+            currentUserName={currentUser.name || 'Cliente'}
+            onSendMessage={handleSendMessage}
+          />
+        );
+      })()}
     </div>
   );
 };

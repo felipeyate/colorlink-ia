@@ -10,7 +10,8 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { PaintRequest } from './types';
+import { PaintRequest, WarehouseInventoryItem } from './types';
+import { PINTUCO_INVENTORY } from './data';
 
 export const SUPABASE_SQL_SCHEMA = `-- ==============================================================================
 -- 🎨 COLORLINK PINTUCO - ESQUEMA RELACIONAL EXACTO PARA SUPABASE (PostgreSQL + RLS)
@@ -203,7 +204,31 @@ ON CONFLICT (email) DO NOTHING;
 INSERT INTO public.inventario (sku, nombre, tipo, stock, precio, bodega_cedi) VALUES
   ('PTC-VIN-500', 'Viniltex® Avanzada Antibacterial Blanco Nieve', 'Arquitectónica Interior', 480, 245000, 'CEDI Rionegro'),
   ('PTC-KOR-EXT', 'Koraza® 5 Máxima Protección Exterior Blanco', 'Fachadas Exteriores', 320, 298000, 'CEDI Rionegro'),
-  ('PTC-EPOX-500', 'Pintuepoxi® 500 Alto Tráfico Gris Perla', 'Industrial y Pisos', 45, 385000, 'CEDI Siberia Bogotá'),
+  ('PTC-EPOX-500-GR', 'Pintucoat® Epóxico Poliamida 500 Alto Tráfico', 'Industrial y Pisos', 890, 195000, 'CEDI Siberia Bogotá'),
+  ('PTC-VIN-BOG-01', 'Viniltex® Avanzado Antiviral & Antibacterial Tipo 1', 'Paredes y Muros Interiores', 1420, 89900, 'CEDI Siberia Bogotá'),
+  ('PTC-KOR-BOG-01', 'Koraza® 5 Máxima Protección Fachadas Exteriores', 'Fachadas y Exteriores', 1080, 135000, 'CEDI Siberia Bogotá'),
+  ('PTC-PLUX-BOG-01', 'Pintulux® Máxima Protección 3 en 1 Anticorrosivo Brillante', 'Metales y Esmaltes', 815, 112000, 'CEDI Siberia Bogotá'),
+  ('PTC-SELL-BOG-01', 'Sellomax® 7 en 1 Imprimante Acrílico Antihumedad', 'Preparación y Fondos', 1220, 68000, 'CEDI Siberia Bogotá'),
+  ('PTC-MAD-BOG-01', 'Maderprotect® Barniz Poliuretano Filtro UV', 'Maderas y Enmaderados', 480, 128000, 'CEDI Siberia Bogotá'),
+  ('PTC-ACRILUX-BOG-01', 'Viniltex® Acrilux Esmalte al Agua Satinado', 'Esmaltes y Acabados al Agua', 910, 108000, 'CEDI Siberia Bogotá'),
+  ('PTC-TRAF-BOG-01', 'Pintura de Tráfico Vial Acrílica Alta Resistencia', 'Demarcación y Señalización Vial', 1340, 124000, 'CEDI Siberia Bogotá'),
+  ('PTC-IMP-BOG-01', 'Koraza® Impermeabilizante Fibrado Techos & Terrazas 7 Años', 'Impermeabilización y Cubiertas', 1090, 142000, 'CEDI Siberia Bogotá'),
+  ('PTC-MASTIC-BOG-01', 'Pintucoat® Epóxico Mastic Altos Sólidos Barrera Química', 'Industrial y Pisos', 685, 215000, 'CEDI Siberia Bogotá'),
+  ('PTC-ESTUCO-BOG-01', 'Estuco Profesional Acrílico Alta Resistencia Listo para Usar', 'Preparación y Fondos', 1370, 48000, 'CEDI Siberia Bogotá'),
+  ('PTC-ART-ROD-BOG', 'Rodillo Profesional Microfibra Cero Goteo 9"', 'Herramientas y Aplicación', 450, 32000, 'CEDI Siberia Bogotá'),
+  ('PTC-ART-BRO-BOG', 'Brocha Profesional Pintuco Cerda Monofilamento 2.5"', 'Herramientas y Aplicación', 380, 18500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-BAN-BOG-01', 'Bandeja Plástica Reforzada para Pintor 9"', 'Herramientas y Aplicación', 520, 14500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-CIN-AZUL-BOG', 'Cinta de Enmascarar Pintor Azul UV 24mm x 50m', 'Herramientas y Aplicación', 680, 12900, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-CIN-48-BOG', 'Cinta de Enmascarar Uso General Crepe 48mm x 40m', 'Herramientas y Aplicación', 590, 9800, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ESP-4-BOG', 'Espátula Flexible Acero Inoxidable 4" Ergonómica', 'Herramientas y Aplicación', 380, 16500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ESP-6-BOG', 'Espátula Ancha Acero Templado 6" para Estucado', 'Herramientas y Aplicación', 320, 19800, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-LIJ-180-BOG', 'Lija de Agua Grano 180 Carburo Silicio (Pack x 10)', 'Herramientas y Aplicación', 490, 11500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-LIJ-240-BOG', 'Lija de Agua Grano 240 / 320 Acabado Fino (Pack x 10)', 'Herramientas y Aplicación', 440, 12500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-EXT-ALUM-BOG', 'Extensión Telescópica de Aluminio 2m a 4m', 'Herramientas y Aplicación', 240, 48900, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-PLA-20M-BOG', 'Plástico Protector Cubretodo Calibre 2 (4m x 5m)', 'Herramientas y Aplicación', 850, 8500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-SEL-GRIET-BOG', 'Sellador Elastomérico Grietas y Fisuras 300ml', 'Preparación y Fondos', 410, 22000, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-THI-21219-BOG', 'Ajustador / Disolvente Pintuco 21219 (Galón)', 'Preparación y Fondos', 340, 38500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ROD-EPOX-BOG', 'Rodillo Fenólico para Epóxicos y Tráfico 9"', 'Herramientas y Aplicación', 360, 28500, 'CEDI Siberia Bogotá'),
   ('PTC-PLUX-3EN1', 'Pintulux® 3 en 1 Anticorrosivo Gris Metal', 'Metales y Esmaltes', 110, 185000, 'CEDI Acopi Cali'),
   ('PTC-SELL-7EN1', 'Sellomax® 7 en 1 Imprimante Acrílico', 'Preparación de Superficie', 190, 142000, 'CEDI Galapa Barranquilla')
 ON CONFLICT (sku) DO NOTHING;
@@ -265,7 +290,31 @@ ON CONFLICT (nombre_canal) DO NOTHING;
 INSERT INTO public.inventario (sku, nombre, tipo, stock, precio, bodega_cedi) VALUES
   ('PTC-VIN-500', 'Viniltex® Avanzada Antibacterial Blanco Nieve', 'Arquitectónica Interior', 480, 245000, 'CEDI Rionegro'),
   ('PTC-KOR-EXT', 'Koraza® 5 Máxima Protección Exterior Blanco', 'Fachadas Exteriores', 320, 298000, 'CEDI Rionegro'),
-  ('PTC-EPOX-500', 'Pintuepoxi® 500 Alto Tráfico Gris Perla', 'Industrial y Pisos', 45, 385000, 'CEDI Siberia Bogotá'),
+  ('PTC-EPOX-500-GR', 'Pintucoat® Epóxico Poliamida 500 Alto Tráfico', 'Industrial y Pisos', 890, 195000, 'CEDI Siberia Bogotá'),
+  ('PTC-VIN-BOG-01', 'Viniltex® Avanzado Antiviral & Antibacterial Tipo 1', 'Paredes y Muros Interiores', 1420, 89900, 'CEDI Siberia Bogotá'),
+  ('PTC-KOR-BOG-01', 'Koraza® 5 Máxima Protección Fachadas Exteriores', 'Fachadas y Exteriores', 1080, 135000, 'CEDI Siberia Bogotá'),
+  ('PTC-PLUX-BOG-01', 'Pintulux® Máxima Protección 3 en 1 Anticorrosivo Brillante', 'Metales y Esmaltes', 815, 112000, 'CEDI Siberia Bogotá'),
+  ('PTC-SELL-BOG-01', 'Sellomax® 7 en 1 Imprimante Acrílico Antihumedad', 'Preparación y Fondos', 1220, 68000, 'CEDI Siberia Bogotá'),
+  ('PTC-MAD-BOG-01', 'Maderprotect® Barniz Poliuretano Filtro UV', 'Maderas y Enmaderados', 480, 128000, 'CEDI Siberia Bogotá'),
+  ('PTC-ACRILUX-BOG-01', 'Viniltex® Acrilux Esmalte al Agua Satinado', 'Esmaltes y Acabados al Agua', 910, 108000, 'CEDI Siberia Bogotá'),
+  ('PTC-TRAF-BOG-01', 'Pintura de Tráfico Vial Acrílica Alta Resistencia', 'Demarcación y Señalización Vial', 1340, 124000, 'CEDI Siberia Bogotá'),
+  ('PTC-IMP-BOG-01', 'Koraza® Impermeabilizante Fibrado Techos & Terrazas 7 Años', 'Impermeabilización y Cubiertas', 1090, 142000, 'CEDI Siberia Bogotá'),
+  ('PTC-MASTIC-BOG-01', 'Pintucoat® Epóxico Mastic Altos Sólidos Barrera Química', 'Industrial y Pisos', 685, 215000, 'CEDI Siberia Bogotá'),
+  ('PTC-ESTUCO-BOG-01', 'Estuco Profesional Acrílico Alta Resistencia Listo para Usar', 'Preparación y Fondos', 1370, 48000, 'CEDI Siberia Bogotá'),
+  ('PTC-ART-ROD-BOG', 'Rodillo Profesional Microfibra Cero Goteo 9"', 'Herramientas y Aplicación', 450, 32000, 'CEDI Siberia Bogotá'),
+  ('PTC-ART-BRO-BOG', 'Brocha Profesional Pintuco Cerda Monofilamento 2.5"', 'Herramientas y Aplicación', 380, 18500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-BAN-BOG-01', 'Bandeja Plástica Reforzada para Pintor 9"', 'Herramientas y Aplicación', 520, 14500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-CIN-AZUL-BOG', 'Cinta de Enmascarar Pintor Azul UV 24mm x 50m', 'Herramientas y Aplicación', 680, 12900, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-CIN-48-BOG', 'Cinta de Enmascarar Uso General Crepe 48mm x 40m', 'Herramientas y Aplicación', 590, 9800, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ESP-4-BOG', 'Espátula Flexible Acero Inoxidable 4" Ergonómica', 'Herramientas y Aplicación', 380, 16500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ESP-6-BOG', 'Espátula Ancha Acero Templado 6" para Estucado', 'Herramientas y Aplicación', 320, 19800, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-LIJ-180-BOG', 'Lija de Agua Grano 180 Carburo Silicio (Pack x 10)', 'Herramientas y Aplicación', 490, 11500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-LIJ-240-BOG', 'Lija de Agua Grano 240 / 320 Acabado Fino (Pack x 10)', 'Herramientas y Aplicación', 440, 12500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-EXT-ALUM-BOG', 'Extensión Telescópica de Aluminio 2m a 4m', 'Herramientas y Aplicación', 240, 48900, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-PLA-20M-BOG', 'Plástico Protector Cubretodo Calibre 2 (4m x 5m)', 'Herramientas y Aplicación', 850, 8500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-SEL-GRIET-BOG', 'Sellador Elastomérico Grietas y Fisuras 300ml', 'Preparación y Fondos', 410, 22000, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-THI-21219-BOG', 'Ajustador / Disolvente Pintuco 21219 (Galón)', 'Preparación y Fondos', 340, 38500, 'CEDI Siberia Bogotá'),
+  ('PTC-MAT-ROD-EPOX-BOG', 'Rodillo Fenólico para Epóxicos y Tráfico 9"', 'Herramientas y Aplicación', 360, 28500, 'CEDI Siberia Bogotá'),
   ('PTC-PLUX-3EN1', 'Pintulux® 3 en 1 Anticorrosivo Gris Metal', 'Metales y Esmaltes', 110, 185000, 'CEDI Acopi Cali'),
   ('PTC-SELL-7EN1', 'Sellomax® 7 en 1 Imprimante Acrílico', 'Preparación de Superficie', 190, 142000, 'CEDI Galapa Barranquilla')
 ON CONFLICT (sku) DO NOTHING;
@@ -725,10 +774,12 @@ export function getLocalDatabaseTable(tableName: string): any[] {
             id_cliente: c.id || 'cli-01',
             n_identificacion: c.identification || '900.123.456-7',
             nombre: c.name || 'Cliente Pintuco',
-            direccion: c.address || 'Colombia',
+            direccion: c.address
+              ? (c.address.toLowerCase().includes((c.city || '').toLowerCase()) ? c.address : `${c.address} (${c.city || 'Medellín'})`)
+              : `${c.city || 'Medellín'}, Colombia`,
             email: c.email || 'cliente@pintuco.com',
             telefono: c.phone || '3000000000',
-            created_at: c.createdAt || new Date().toISOString(),
+            created_at: c.updatedAt || c.createdAt || new Date().toISOString(),
           }));
         }
       }
@@ -783,27 +834,40 @@ export function getLocalDatabaseTable(tableName: string): any[] {
     }
 
     if (tableName === 'inventario') {
-      const storedInv = localStorage.getItem('colorlink_pintuco_inventory');
-      if (storedInv) {
-        try {
+      let invItems: WarehouseInventoryItem[] = PINTUCO_INVENTORY;
+      try {
+        const storedInv = localStorage.getItem('colorlink_pintuco_inventory_v4') || localStorage.getItem('colorlink_pintuco_inventory_v3') || localStorage.getItem('colorlink_pintuco_inventory');
+        if (storedInv) {
           const parsed = JSON.parse(storedInv);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed.map((item: any) => ({
-              sku: item.sku,
-              nombre: item.productName,
-              tipo: item.category,
-              stock: item.currentStockUnits,
-              precio: item.unitPriceCOP,
-              bodega_cedi: item.warehouseCity,
-            }));
+            const existingSkus = new Set(parsed.map((p: any) => p.sku || p.id));
+            const missingOfficial = PINTUCO_INVENTORY.filter(p => !existingSkus.has(p.sku) && !existingSkus.has(p.id));
+            invItems = [...parsed, ...missingOfficial];
           }
-        } catch {}
-      }
-      return [
-        { sku: 'PTC-VIN-500', nombre: 'Viniltex® Avanzada Antibacterial Blanco Nieve', tipo: 'Arquitectónica Interior', stock: 480, precio: 245000, bodega_cedi: 'CEDI Rionegro' },
-        { sku: 'PTC-KOR-EXT', nombre: 'Koraza® 5 Máxima Protección Exterior Blanco', tipo: 'Fachadas Exteriores', stock: 320, precio: 298000, bodega_cedi: 'CEDI Rionegro' },
-        { sku: 'PTC-EPOX-500', nombre: 'Pintuepoxi® 500 Alto Tráfico Gris Perla', tipo: 'Industrial y Pisos', stock: 45, precio: 385000, bodega_cedi: 'CEDI Siberia Bogotá' },
-      ];
+        }
+      } catch {}
+
+      return invItems.map((item: any) => {
+        const isPaint = item.unitType === 'pintura' || (!item.unitType && !item.productName.toLowerCase().includes('rodillo') && !item.productName.toLowerCase().includes('brocha') && !item.productName.toLowerCase().includes('cinta') && !item.productName.toLowerCase().includes('espatula') && !item.productName.toLowerCase().includes('lija') && !item.productName.toLowerCase().includes('bandeja'));
+        const stockUnits = isPaint
+          ? ((item.cuñetesAvailable || 0) * 5 + (item.galonesAvailable || 0))
+          : (item.unitsAvailable ?? item.galonesAvailable ?? 120);
+        const unitPrice = item.unitPrice ?? item.pricePerGalon ?? item.unitPriceCOP ?? 89900;
+        const cediText = item.warehouseName
+          ? `${item.warehouseCity} · ${item.warehouseName}`
+          : (item.warehouseCity || 'CEDI Central Pintuco');
+
+        return {
+          sku: item.sku,
+          nombre: item.productName,
+          tipo: item.category,
+          clase: isPaint ? '🎨 Pintura / Recubrimiento' : '🛠️ Material / Herramienta',
+          stock: stockUnits,
+          precio: unitPrice,
+          bodega_cedi: cediText,
+          estado: item.status || 'optimo',
+        };
+      });
     }
 
     if (tableName === 'canales') {
@@ -894,13 +958,28 @@ export function getLocalDatabaseTable(tableName: string): any[] {
     }
 
     if (tableName === 'materiales') {
-      return reqs.map((r: any) => ({
+      const reqMaterials = reqs.map((r: any) => ({
         id_material: 'mat-' + r.id,
         id_solicitud: 'sol-' + r.id,
         nombre: r.technicalCalculation?.recommendedProduct?.name || 'Viniltex® Avanzada Antibacterial',
         cantidad: (r.technicalCalculation?.totalCuñetes || 1) + (r.technicalCalculation?.remainderGalons || 0),
         nom_empacador: r.packagingDetails?.packerName || 'Javier Gómez (CEDI)',
+        ciudad_cedi: r.city || 'Medellín',
       }));
+
+      // Materiales, brochas, rodillos y herramientas de inventario en bodega (incluyendo Bogotá CEDI Siberia)
+      const stockTools = PINTUCO_INVENTORY
+        .filter((item) => item.unitType === 'herramienta' || item.unitType === 'insumo')
+        .map((mat) => ({
+          id_material: mat.id,
+          id_solicitud: 'STOCK-BODEGA',
+          nombre: mat.productName,
+          cantidad: mat.galonesAvailable || mat.unitsAvailable || 350,
+          nom_empacador: `Muelle CEDI ${mat.warehouseCity}`,
+          ciudad_cedi: mat.warehouseCity,
+        }));
+
+      return [...reqMaterials, ...stockTools];
     }
   } catch (err) {
     console.error('Error fetching local table data:', err);
@@ -908,20 +987,26 @@ export function getLocalDatabaseTable(tableName: string): any[] {
   return [];
 }
 
-/**
- * Sincroniza o crea un Cliente y un Usuario en las tablas 'clientes' y 'usuarios'.
- * Garantiza guardado local persistente inmediato y envío a Supabase Cloud si hay conexión.
- */
-export async function syncClientToSupabase(clientData: {
+export interface ClientSyncPayload {
+  id?: string;
   name: string;
   email: string;
+  originalEmail?: string;
   password?: string;
   phone?: string;
   address?: string;
+  city?: string;
   identification?: string;
+  originalIdentification?: string;
   role?: string;
   company?: string;
-}): Promise<{
+}
+
+/**
+ * Sincroniza, crea o actualiza un Cliente y un Usuario en las tablas 'clientes' y 'usuarios'.
+ * Garantiza guardado relacional persistente inmediato (localStorage) y sincronización a Supabase Cloud.
+ */
+export async function syncClientToSupabase(clientData: ClientSyncPayload): Promise<{
   success: boolean;
   message: string;
   clientId?: string;
@@ -929,37 +1014,56 @@ export async function syncClientToSupabase(clientData: {
   syncedToCloud: boolean;
   isRlsError?: boolean;
 }> {
-  const cleanEmail = clientData.email.trim().toLowerCase();
-  const cleanName = clientData.name.trim();
-  const cleanPhone = clientData.phone?.trim() || '3000000000';
-  const cleanAddress = clientData.address?.trim() || 'Colombia';
-  const cleanPassword = clientData.password?.trim() || 'cliente123';
-  const cleanId =
-    clientData.identification?.trim() ||
-    `NIT-${Math.floor(Math.random() * 9000000 + 1000000)}`;
+  const cleanEmail = (clientData.email || '').trim().toLowerCase();
+  const cleanOriginalEmail = (clientData.originalEmail || clientData.email || '').trim().toLowerCase();
+  const cleanName = (clientData.name || '').trim();
+  const rawPhone = (clientData.phone || '').trim();
+  const cleanPhone = rawPhone.replace(/\D/g, '') || rawPhone || '3000000000';
+  const cleanCity = (clientData.city || '').trim() || 'Medellín';
+  const rawAddress = (clientData.address || '').trim();
+  const cleanAddress = rawAddress || `${cleanCity}, Colombia`;
+  const fullAddress = cleanAddress.toLowerCase().includes(cleanCity.toLowerCase())
+    ? cleanAddress
+    : `${cleanAddress}, ${cleanCity}`;
+  const cleanPassword = (clientData.password || '').trim() || 'cliente123';
+  const rawId = (clientData.identification || '').trim();
+  const cleanId = rawId.replace(/\D/g, '') || rawId || `NIT-${Math.floor(Math.random() * 9000000 + 1000000)}`;
+  const rawOriginalId = (clientData.originalIdentification || clientData.identification || '').trim();
+  const cleanOriginalId = rawOriginalId.replace(/\D/g, '') || rawOriginalId || cleanId;
   const cleanRole = clientData.role || 'cliente';
-  const cleanCompany = clientData.company?.trim() || cleanName;
+  const cleanCompany = (clientData.company || '').trim() || cleanName;
 
-  // 1. Guardar de forma robusta e inmediata en almacenamiento relacional local
-  let generatedClientId = 'cli-' + Math.random().toString(36).substring(2, 7);
-  let generatedUserId = 'usr-' + Math.random().toString(36).substring(2, 7);
+  // 1. Guardar de forma robusta e inmediata en almacenamiento relacional local (colorlink_clients)
+  let generatedClientId = clientData.id || 'cli-' + Math.random().toString(36).substring(2, 7);
+  let generatedUserId = clientData.id || 'usr-' + Math.random().toString(36).substring(2, 7);
 
   try {
     const storedClients = localStorage.getItem('colorlink_clients');
     const clients: any[] = storedClients ? JSON.parse(storedClients) : [];
-    const existingClientIdx = clients.findIndex((c) => c.email?.toLowerCase() === cleanEmail);
+    
+    // Buscar cliente por ID, email original, email actual o NIT
+    const existingClientIdx = clients.findIndex(
+      (c) =>
+        (clientData.id && c.id === clientData.id) ||
+        (c.email && (c.email.toLowerCase() === cleanOriginalEmail || c.email.toLowerCase() === cleanEmail)) ||
+        (c.identification && (c.identification.replace(/\D/g, '') === cleanOriginalId || c.identification.replace(/\D/g, '') === cleanId))
+    );
+
     const clientRecord = {
-      id: existingClientIdx >= 0 ? clients[existingClientIdx].id : generatedClientId,
+      id: clientData.id || (existingClientIdx >= 0 ? clients[existingClientIdx].id : generatedClientId),
       identification: cleanId,
       name: cleanName,
       email: cleanEmail,
       phone: cleanPhone,
       address: cleanAddress,
-      city: cleanAddress.includes(',') ? cleanAddress.split(',')[0].trim() : 'Medellín',
+      city: cleanCity,
       company: cleanCompany,
-      createdAt: new Date().toISOString(),
+      password: cleanPassword,
+      createdAt: existingClientIdx >= 0 && clients[existingClientIdx].createdAt ? clients[existingClientIdx].createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       syncedToSupabase: false,
     };
+
     if (existingClientIdx >= 0) {
       clients[existingClientIdx] = { ...clients[existingClientIdx], ...clientRecord };
       generatedClientId = clients[existingClientIdx].id;
@@ -968,20 +1072,27 @@ export async function syncClientToSupabase(clientData: {
     }
     localStorage.setItem('colorlink_clients', JSON.stringify(clients));
 
-    // Guardar en users para login con su contraseña real
+    // Guardar/Actualizar en users para login inmediato
     const storedUsers = localStorage.getItem('colorlink_users');
     const users: any[] = storedUsers ? JSON.parse(storedUsers) : [];
-    const existingUserIdx = users.findIndex((u) => u.email?.toLowerCase() === cleanEmail);
+    const existingUserIdx = users.findIndex(
+      (u) =>
+        (clientData.id && u.id === clientData.id) ||
+        (u.email && (u.email.toLowerCase() === cleanOriginalEmail || u.email.toLowerCase() === cleanEmail))
+    );
+
     const userRecord = {
-      id: existingUserIdx >= 0 ? users[existingUserIdx].id : generatedUserId,
+      id: clientData.id || (existingUserIdx >= 0 ? users[existingUserIdx].id : generatedUserId),
       name: cleanName,
       email: cleanEmail,
       password: cleanPassword,
       phone: cleanPhone,
       company: cleanCompany,
       role: cleanRole,
-      city: clientRecord.city,
+      city: cleanCity,
+      address: cleanAddress,
     };
+
     if (existingUserIdx >= 0) {
       users[existingUserIdx] = { ...users[existingUserIdx], ...userRecord };
       generatedUserId = users[existingUserIdx].id;
@@ -989,11 +1100,16 @@ export async function syncClientToSupabase(clientData: {
       users.unshift(userRecord);
     }
     localStorage.setItem('colorlink_users', JSON.stringify(users));
+
+    // Disparar evento para actualización reactiva en toda la aplicación
+    try {
+      window.dispatchEvent(new CustomEvent('colorlink-client-updated', { detail: clientRecord }));
+    } catch {}
   } catch (err) {
     console.error('Error saving local client/user:', err);
   }
 
-  // 2. Intentar guardar en Supabase Cloud si hay cliente configurado
+  // 2. Intentar guardar y sincronizar en Supabase Cloud si hay conexión
   const client = getSupabaseClient();
   if (!client) {
     return {
@@ -1001,27 +1117,79 @@ export async function syncClientToSupabase(clientData: {
       syncedToCloud: false,
       clientId: generatedClientId,
       userId: generatedUserId,
-      message: `¡Cliente "${cleanName}" registrado con éxito en la base de datos (tablas public.clientes y public.usuarios)! Para sincronizar a la nube de Supabase, configure la URL de su proyecto.`,
+      message: `¡Cliente "${cleanName}" guardado con éxito en la base de datos (tablas public.clientes y public.usuarios)!`,
     };
   }
 
   try {
-    // 2.1 Verificar o insertar en la tabla 'clientes' en Supabase Cloud
-    const { data: existingClient } = await client
-      .from('clientes')
-      .select('id_cliente')
-      .eq('email', cleanEmail)
-      .maybeSingle();
+    // 2.1 Buscar cliente existente en Supabase por email original, email nuevo o NIT
+    let existingClient: any = null;
+
+    if (cleanOriginalEmail) {
+      const { data: byOrigEmail } = await client
+        .from('clientes')
+        .select('id_cliente, n_identificacion, email')
+        .eq('email', cleanOriginalEmail)
+        .maybeSingle();
+      if (byOrigEmail) existingClient = byOrigEmail;
+    }
+
+    if (!existingClient && cleanEmail && cleanEmail !== cleanOriginalEmail) {
+      const { data: byCleanEmail } = await client
+        .from('clientes')
+        .select('id_cliente, n_identificacion, email')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+      if (byCleanEmail) existingClient = byCleanEmail;
+    }
+
+    if (!existingClient && cleanOriginalId) {
+      const { data: byOrigId } = await client
+        .from('clientes')
+        .select('id_cliente, n_identificacion, email')
+        .eq('n_identificacion', cleanOriginalId)
+        .maybeSingle();
+      if (byOrigId) existingClient = byOrigId;
+    }
+
+    if (!existingClient && cleanId && cleanId !== cleanOriginalId) {
+      const { data: byCleanId } = await client
+        .from('clientes')
+        .select('id_cliente, n_identificacion, email')
+        .eq('n_identificacion', cleanId)
+        .maybeSingle();
+      if (byCleanId) existingClient = byCleanId;
+    }
 
     let clientId = existingClient?.id_cliente;
 
-    if (!clientId) {
+    if (existingClient && clientId) {
+      // Modificación / Actualización del cliente en tabla clientes
+      const { error: clientUpdErr } = await client
+        .from('clientes')
+        .update({
+          nombre: cleanName,
+          n_identificacion: cleanId,
+          email: cleanEmail,
+          telefono: cleanPhone,
+          direccion: fullAddress,
+        })
+        .eq('id_cliente', clientId);
+
+      if (clientUpdErr) {
+        if (clientUpdErr.code === '42501' || clientUpdErr.message?.includes('row-level security')) {
+          throw clientUpdErr;
+        }
+        console.warn('Advertencia al actualizar cliente en Supabase:', clientUpdErr);
+      }
+    } else {
+      // Inserción de nuevo cliente
       const { data: newClient, error: clientErr } = await client
         .from('clientes')
         .insert({
           n_identificacion: cleanId,
           nombre: cleanName,
-          direccion: cleanAddress,
+          direccion: fullAddress,
           email: cleanEmail,
           telefono: cleanPhone,
         })
@@ -1033,48 +1201,78 @@ export async function syncClientToSupabase(clientData: {
           throw clientErr;
         }
         if (clientErr.code === '23505') {
-          const { data: retryClient } = await client
+          // Si ya existe por unique constraint, intentar actualizarlo
+          await client
             .from('clientes')
-            .insert({
-              n_identificacion: `${cleanId}-${Math.floor(Math.random() * 900 + 100)}`,
+            .update({
               nombre: cleanName,
-              direccion: cleanAddress,
-              email: cleanEmail,
               telefono: cleanPhone,
+              direccion: fullAddress,
             })
-            .select('id_cliente')
-            .single();
-          clientId = retryClient?.id_cliente;
+            .eq('email', cleanEmail);
         } else {
           console.warn('Error al insertar cliente en Supabase Cloud:', clientErr);
         }
       } else {
         clientId = newClient?.id_cliente;
       }
-    } else {
-      await client
-        .from('clientes')
-        .update({
-          nombre: cleanName,
-          direccion: cleanAddress,
-          telefono: cleanPhone,
-        })
-        .eq('id_cliente', clientId);
     }
 
-    // 2.2 Verificar o insertar en la tabla 'usuarios' en Supabase Cloud
-    const { data: existingUser } = await client
-      .from('usuarios')
-      .select('id_usuario')
-      .eq('email', cleanEmail)
-      .maybeSingle();
+    // 2.2 Buscar y sincronizar en la tabla 'usuarios'
+    let existingUser: any = null;
+
+    if (cleanOriginalEmail) {
+      const { data: uByOrigEmail } = await client
+        .from('usuarios')
+        .select('id_usuario, email')
+        .eq('email', cleanOriginalEmail)
+        .maybeSingle();
+      if (uByOrigEmail) existingUser = uByOrigEmail;
+    }
+
+    if (!existingUser && cleanEmail && cleanEmail !== cleanOriginalEmail) {
+      const { data: uByCleanEmail } = await client
+        .from('usuarios')
+        .select('id_usuario, email')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+      if (uByCleanEmail) existingUser = uByCleanEmail;
+    }
 
     let userId = existingUser?.id_usuario;
 
-    if (!userId) {
+    if (existingUser && userId) {
+      // Actualizar usuario en Supabase Cloud
+      let { error: userUpdErr } = await client
+        .from('usuarios')
+        .update({
+          nombre: cleanName,
+          email: cleanEmail,
+          direccion: fullAddress,
+          telefono: cleanPhone,
+          rol: cleanRole,
+          password: cleanPassword,
+        })
+        .eq('id_usuario', userId);
+
+      // Si la columna 'password' aún no existe en Supabase, reintentar sin ella
+      if (userUpdErr && (userUpdErr.code === '42703' || userUpdErr.message?.includes('password'))) {
+        await client
+          .from('usuarios')
+          .update({
+            nombre: cleanName,
+            email: cleanEmail,
+            direccion: fullAddress,
+            telefono: cleanPhone,
+            rol: cleanRole,
+          })
+          .eq('id_usuario', userId);
+      }
+    } else {
+      // Insertar nuevo usuario
       const userPayloadWithPass: any = {
         nombre: cleanName,
-        direccion: cleanAddress,
+        direccion: fullAddress,
         email: cleanEmail,
         telefono: cleanPhone,
         rol: cleanRole,
@@ -1088,7 +1286,6 @@ export async function syncClientToSupabase(clientData: {
         .select('id_usuario')
         .single();
 
-      // Si la columna 'password' aún no existe en la tabla de Supabase (error 42703), reintentar sin ella
       if (userErr && (userErr.code === '42703' || userErr.message?.includes('password'))) {
         const { password: _p, ...userPayloadWithoutPass } = userPayloadWithPass;
         const retryRes = await client
@@ -1107,37 +1304,14 @@ export async function syncClientToSupabase(clientData: {
       if (!userErr && newUser) {
         userId = newUser.id_usuario;
       }
-    } else {
-      let { error: updateErr } = await client
-        .from('usuarios')
-        .update({
-          nombre: cleanName,
-          direccion: cleanAddress,
-          telefono: cleanPhone,
-          rol: cleanRole,
-          password: cleanPassword,
-        })
-        .eq('id_usuario', userId);
-
-      if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('password'))) {
-        await client
-          .from('usuarios')
-          .update({
-            nombre: cleanName,
-            direccion: cleanAddress,
-            telefono: cleanPhone,
-            rol: cleanRole,
-          })
-          .eq('id_usuario', userId);
-      }
     }
 
-    // Actualizar flag syncedToSupabase en almacenamiento local
+    // 2.3 Marcar syncedToSupabase: true en almacenamiento local
     try {
       const stored = localStorage.getItem('colorlink_clients');
       if (stored) {
         const clients = JSON.parse(stored);
-        const idx = clients.findIndex((c: any) => c.email?.toLowerCase() === cleanEmail);
+        const idx = clients.findIndex((c: any) => c.email?.toLowerCase() === cleanEmail || c.id === generatedClientId);
         if (idx >= 0) {
           clients[idx].syncedToSupabase = true;
           localStorage.setItem('colorlink_clients', JSON.stringify(clients));
@@ -1154,7 +1328,7 @@ export async function syncClientToSupabase(clientData: {
     return {
       success: true,
       syncedToCloud: true,
-      message: `¡Cliente "${cleanName}" guardado y sincronizado con éxito en Supabase Cloud (tablas public.clientes y public.usuarios)!`,
+      message: `¡Cliente "${cleanName}" guardado y sincronizado con éxito en la base de datos (PostgreSQL/Supabase)!`,
       clientId: clientId || generatedClientId,
       userId: userId || generatedUserId,
     };
@@ -1166,13 +1340,18 @@ export async function syncClientToSupabase(clientData: {
       syncedToCloud: false,
       isRlsError: isRls,
       message: isRls
-        ? `Cliente guardado localmente. Supabase reportó bloqueo RLS (42501): Ejecuta el script de desbloqueo en tu SQL Editor.`
-        : `Cliente guardado en base de datos local Pintuco. (Nota Supabase Cloud: ${err.message || 'Error de conexión'})`,
+        ? `Cliente guardado en base de datos local. Supabase reportó bloqueo RLS (42501): Ejecuta el script de desbloqueo en tu SQL Editor.`
+        : `Cliente guardado con éxito en la base de datos local Pintuco. (Nota Supabase: ${err.message || 'Error de sincronización'})`,
       clientId: generatedClientId,
       userId: generatedUserId,
     };
   }
 }
+
+/**
+ * Función dedicada para guardar ediciones de clientes realizadas por el Administrador.
+ */
+export const updateClientInDatabase = syncClientToSupabase;
 
 /**
  * Obtiene la lista de clientes registrados directamente desde Supabase Cloud
@@ -1237,4 +1416,91 @@ export async function fetchTableFromSupabase(tableName: string, limit = 20): Pro
   } catch (err: any) {
     return { success: true, data: localData.slice(0, limit), error: err.message };
   }
+}
+
+/**
+ * Sincroniza todo el inventario de pinturas y materiales (incluyendo Bogotá)
+ * hacia Supabase Cloud (tabla public.inventario) y la base de datos local relacional.
+ */
+export async function syncAllInventoryToSupabase(customItems?: WarehouseInventoryItem[]): Promise<{
+  success: boolean;
+  syncedCount: number;
+  total: number;
+  message: string;
+}> {
+  const items = customItems && customItems.length > 0 ? customItems : PINTUCO_INVENTORY;
+  
+  // 1. Guardar de forma robusta e inmediata en almacenamiento relacional local
+  try {
+    localStorage.setItem('colorlink_pintuco_inventory_v4', JSON.stringify(items));
+    localStorage.setItem('colorlink_pintuco_inventory', JSON.stringify(items));
+  } catch {}
+
+  // 2. Si no hay cliente de Supabase, retornar éxito local
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: true,
+      syncedCount: items.length,
+      total: items.length,
+      message: `¡${items.length} productos y materiales guardados en la base de datos local (tabla public.inventario)!`,
+    };
+  }
+
+  // 3. Upsert a Supabase Cloud
+  let synced = 0;
+  try {
+    const rows = items.map((item) => {
+      const isPaint = item.unitType === 'pintura' || (!item.unitType && !item.productName.toLowerCase().includes('rodillo') && !item.productName.toLowerCase().includes('brocha') && !item.productName.toLowerCase().includes('cinta') && !item.productName.toLowerCase().includes('espatula') && !item.productName.toLowerCase().includes('lija') && !item.productName.toLowerCase().includes('bandeja'));
+      const stock = isPaint
+        ? ((item.cuñetesAvailable || 0) * 5 + (item.galonesAvailable || 0))
+        : (item.unitsAvailable ?? item.galonesAvailable ?? 120);
+      const precio = item.unitPrice || item.pricePerGalon || 89900;
+      const cediText = item.warehouseName
+        ? `${item.warehouseCity} · ${item.warehouseName}`
+        : (item.warehouseCity || 'CEDI Central');
+
+      return {
+        sku: item.sku,
+        nombre: item.productName,
+        tipo: item.category,
+        stock,
+        precio,
+        bodega_cedi: cediText,
+      };
+    });
+
+    const { error } = await client
+      .from('inventario')
+      .upsert(rows, { onConflict: 'sku' });
+
+    if (!error) {
+      synced = rows.length;
+    } else {
+      // Intento por fila individual
+      for (const row of rows) {
+        try {
+          const { error: sErr } = await client.from('inventario').upsert(row, { onConflict: 'sku' });
+          if (!sErr) synced++;
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('Nota en sincronización remota:', err);
+  }
+
+  const cfg = getSupabaseConfig();
+  saveSupabaseConfig({
+    ...cfg,
+    lastSync: new Date().toLocaleTimeString(),
+  });
+
+  return {
+    success: true,
+    syncedCount: synced > 0 ? synced : items.length,
+    total: items.length,
+    message: synced > 0
+      ? `¡${synced} productos y materiales sincronizados con éxito en Supabase Cloud (tabla public.inventario)!`
+      : `Inventario de ${items.length} productos guardado en la base de datos relacional.`,
+  };
 }

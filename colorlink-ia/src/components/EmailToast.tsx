@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { EmailNotification, UserProfile } from '../types';
-import { Mail, CheckCircle2, ArrowRight, X, Sparkles, Package, Truck, ShieldCheck, Send } from '../icons';
+import { Mail, CheckCircle2, ArrowRight, X, Sparkles, Package, Truck, ShieldCheck, Send, ExternalLink } from '../icons';
+import { openInGmail } from '../emailService';
 
 interface EmailToastProps {
   currentUser?: UserProfile | null;
@@ -15,14 +16,8 @@ export const EmailToast: React.FC<EmailToastProps> = ({ currentUser, onOpenEmail
       const customEvent = e as CustomEvent<EmailNotification>;
       if (customEvent.detail) {
         // SEGURIDAD & PRIVACIDAD:
-        // Solo el cliente registrado puede ver sus propias notificaciones en la interfaz
-        if (!currentUser || !currentUser.email) {
-          // Si no está registrado o no ha iniciado sesión, no mostrar notificaciones flotantes
-          return;
-        }
-
-        // Si es cliente, SOLO ver si el correo va dirigido a su email exacto
-        if (currentUser.role !== 'administrador') {
+        // Si hay usuario autenticado, solo mostrar si va dirigido a él (o si es admin)
+        if (currentUser && currentUser.email && currentUser.role !== 'administrador') {
           const clientEmail = currentUser.email.toLowerCase().trim();
           const targetEmail = (customEvent.detail.toEmail || '').toLowerCase().trim();
           if (targetEmail !== clientEmail) {
@@ -31,12 +26,13 @@ export const EmailToast: React.FC<EmailToastProps> = ({ currentUser, onOpenEmail
           }
         }
 
+        // Si no hay sesión iniciada pero es un correo de bienvenida recién despachado (registro nuevo), mostrarlo
         setActiveToast(customEvent.detail);
 
-        // Auto ocultar después de 9 segundos si el usuario no interactúa
+        // Auto ocultar después de 12 segundos si el usuario no interactúa
         const timer = setTimeout(() => {
           setActiveToast((current) => (current?.id === customEvent.detail.id ? null : current));
-        }, 9000);
+        }, 12000);
 
         return () => clearTimeout(timer);
       }
@@ -67,7 +63,7 @@ export const EmailToast: React.FC<EmailToastProps> = ({ currentUser, onOpenEmail
 
   return (
     <div
-      className="fixed bottom-5 right-5 z-50 max-w-md w-full bg-[#0a192f] text-white rounded-2xl p-4 shadow-2xl border border-blue-500/30 animate-fade-in flex flex-col gap-2.5 backdrop-blur-md"
+      className="fixed bottom-5 left-4 sm:left-6 z-50 max-w-md w-full bg-[#0a192f] text-white rounded-2xl p-4 shadow-2xl border border-blue-500/30 animate-fade-in flex flex-col gap-2.5 backdrop-blur-md"
       id="email-notification-toast"
     >
       <div className="flex items-start justify-between gap-3">
@@ -111,6 +107,17 @@ export const EmailToast: React.FC<EmailToastProps> = ({ currentUser, onOpenEmail
             <CheckCircle2 className="w-3 h-3 text-sky-400" />
             Enviado al correo
           </span>
+          <button
+            type="button"
+            onClick={() => {
+              openInGmail(activeToast);
+            }}
+            className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 transition-colors shadow-xs cursor-pointer"
+            title="Abrir este correo en Gmail Web pre-llenado"
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span>Gmail</span>
+          </button>
           <button
             type="button"
             onClick={() => {

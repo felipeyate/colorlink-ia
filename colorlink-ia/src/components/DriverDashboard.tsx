@@ -1,8 +1,9 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { PaintRequest, UserProfile } from '../types';
+import { PaintRequest, UserProfile, OrderChatMessage } from '../types';
 import { sendOrderInTransitEmail, sendOrderDeliveredEmail } from '../emailService';
 import { getProductImage } from '../data';
 import { isSameCity } from '../utils/cityUtils';
+import { OrderChatModal } from './OrderChatModal';
 import {
   Truck,
   MapPin,
@@ -71,6 +72,39 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
+
+  // Chat con el cliente (pequeño Wasap en tiempo real)
+  const [chatReqId, setChatReqId] = useState<string | null>(null);
+
+  const handleSendMessage = (requestId: string, messageText: string) => {
+    const req = requests.find((r) => r.id === requestId) || selectedRequest;
+    if (!req) return;
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const newMsg: OrderChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      senderRole: 'conductor',
+      senderName: currentUser.name || 'Wilson Cañas (Conductor)',
+      message: messageText,
+      timestamp: timeStr,
+      createdAtIso: now.toISOString(),
+    };
+
+    const updatedReq: PaintRequest = {
+      ...req,
+      chatMessages: [...(req.chatMessages || []), newMsg],
+    };
+
+    onUpdateRequest(updatedReq);
+    try {
+      window.dispatchEvent(
+        new CustomEvent('colorlink-order-chat-updated', {
+          detail: { requestId, message: newMsg, updatedRequest: updatedReq },
+        })
+      );
+    } catch {}
+  };
 
   React.useEffect(() => {
     if (selectedRequest) {
@@ -269,60 +303,59 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
   return (
     <div className="space-y-6" id="driver-dashboard-root">
-      {/* Banner Principal del Conductor */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white rounded-2xl p-6 shadow-sm border border-blue-800/40 relative overflow-hidden">
-        {/* Glow sutil azul celeste */}
-        <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+      {/* Banner Principal del Conductor · Control de Flota & Despacho */}
+      <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-7 shadow-xs border border-slate-800 relative overflow-hidden">
+        <div className="absolute -right-12 -bottom-12 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-sky-300">
-              <Truck className="w-6 h-6" />
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-emerald-600/90 text-white flex items-center justify-center font-bold shadow-xs shrink-0 border border-emerald-400/30">
+              <Truck className="w-6 h-6 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10.5px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 border border-emerald-400/30 font-bold">
-                  SEDE CEDI {driverCity.toUpperCase()} · PEDIDOS EXCLUSIVOS DE TU CIUDAD
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 font-semibold">
+                  SEDE CEDI {driverCity.toUpperCase()} · FLOTA EXPRESS
                 </span>
-                <span className="text-xs text-blue-200/80">· Flota Logística ColorLink Express</span>
+                <span className="text-xs text-slate-400 font-medium">· Hoja de Ruta & Georreferenciación</span>
               </div>
-              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1">
-                Hoja de Ruta y Entregas de Pintura · {driverCity}
+              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1 tracking-tight">
+                Hoja de Ruta y Entregas de Pintura · CEDI {driverCity}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/10 backdrop-blur-xs px-4 py-2 rounded-xl border border-white/15 text-xs">
+          <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-2 rounded-xl border border-slate-800 text-xs">
             <div className="text-right">
-              <span className="text-sky-300 block text-[10px] uppercase font-mono font-bold">Conductor / Sede:</span>
-              <strong className="text-white text-sm">{currentUser.name} ({driverCity})</strong>
-              <span className="text-sky-300 block text-[11px] font-mono">
+              <span className="text-slate-400 block text-[10px] uppercase font-mono font-medium">Conductor en Turno:</span>
+              <strong className="text-white text-sm">{currentUser.name}</strong>
+              <span className="text-emerald-400 block text-[11px] font-mono">
                 {currentUser.vehiclePlate || 'WTL-582 (Camión NHR)'}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs relative z-10">
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Total Despachos {driverCity}:</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-white">{cityRequests.length} envíos</span>
+        <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs relative z-10">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-slate-400 block text-[10px] font-mono uppercase">Total Despachos {driverCity}:</span>
+            <span className="text-lg font-bold font-mono text-white mt-0.5 block">{cityRequests.length} envíos</span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Listos para Cargar (Empacados):</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-sky-300">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-emerald-300 block text-[10px] font-mono uppercase">Listos para Cargar:</span>
+            <span className="text-lg font-bold font-mono text-emerald-300 mt-0.5 block">
               {cityRequests.filter((r) => r.packagingDetails?.status === 'empacado_listo' && r.deliveryDetails?.routeStatus !== 'entregado' && r.deliveryDetails?.routeStatus !== 'en_ruta').length}
             </span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">En Ruta Activa:</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-sky-200">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-blue-300 block text-[10px] font-mono uppercase">En Ruta Activa:</span>
+            <span className="text-lg font-bold font-mono text-blue-200 mt-0.5 block">
               {cityRequests.filter((r) => r.deliveryDetails?.routeStatus === 'en_ruta').length}
             </span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-rose-300 block text-[10px] font-mono font-bold uppercase">Sin Empacar (Bloqueados):</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-rose-300">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-rose-300 block text-[10px] font-mono uppercase">Por Empacar:</span>
+            <span className="text-lg font-bold font-mono text-rose-300 mt-0.5 block">
               {cityRequests.filter((r) => r.packagingDetails?.status !== 'empacado_listo').length}
             </span>
           </div>
@@ -482,6 +515,28 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                             {reqCalc?.totalCuñetes || 1} Cuñetes + {reqCalc?.remainderGalons || 0} Gal
                           </span>
                         </div>
+
+                        {/* Botón Directo de Comunicación Wasap en cada pedido */}
+                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedReqId(req.id);
+                              setChatReqId(req.id);
+                            }}
+                            className="w-full py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            title="Escribir al cliente en tiempo real"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>💬 Mensajes con Cliente</span>
+                            {req.chatMessages && req.chatMessages.length > 0 && (
+                              <span className="ml-1 px-1.5 py-0.2 bg-[#25D366] text-slate-950 text-[10px] font-mono font-bold rounded-full">
+                                {req.chatMessages.length}
+                              </span>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -522,11 +577,27 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
                   {/* Acciones Rápidas con el Cliente */}
                   <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Botón Principal: Mensajes en Tiempo Real */}
+                    <button
+                      type="button"
+                      onClick={() => setChatReqId(selectedRequest.id)}
+                      className="px-3 py-1.5 bg-[#25D366] hover:bg-[#1ebd5b] text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md ring-1 ring-white/30 cursor-pointer"
+                      title="Abrir mensajes en vivo con este cliente"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-slate-950" />
+                      <span>💬 Mensajes con Cliente</span>
+                      {selectedRequest.chatMessages && selectedRequest.chatMessages.length > 0 && (
+                        <span className="ml-1 px-1.5 py-0.2 bg-slate-950 text-white text-[10px] font-mono font-bold rounded-full">
+                          {selectedRequest.chatMessages.length}
+                        </span>
+                      )}
+                    </button>
+
                     <a
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedRequest.deliveryAddress || selectedRequest.city + ', Colombia')}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-2.5 py-1 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+                      className="px-2.5 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors"
                       title="Abrir ubicación en Google Maps"
                     >
                       <Navigation className="w-3.5 h-3.5" />
@@ -534,19 +605,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                     </a>
 
                     <a
-                      href={`https://wa.me/57${(selectedRequest.clientPhone || '3000000000').replace(/\D/g, '')}?text=${encodeURIComponent(`Hola ${selectedRequest.clientName}, te saluda tu conductor Pintuco Express. Voy en camino con la entrega de tu pedido ${selectedRequest.requestCode}.`)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors"
-                      title="Enviar mensaje por WhatsApp"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      WhatsApp
-                    </a>
-
-                    <a
                       href={`tel:${selectedRequest.clientPhone}`}
-                      className="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+                      className="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors"
                     >
                       <Phone className="w-3.5 h-3.5" />
                       Llamar
@@ -967,6 +1027,22 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal / Ventana de Chat Wasap en Tiempo Real con el Cliente */}
+      {chatReqId && (() => {
+        const chatReq = requests.find((r) => r.id === chatReqId) || selectedRequest;
+        if (!chatReq) return null;
+        return (
+          <OrderChatModal
+            isOpen={Boolean(chatReqId)}
+            onClose={() => setChatReqId(null)}
+            request={chatReq}
+            currentUserRole="conductor"
+            currentUserName={currentUser.name || 'Wilson Cañas (Conductor)'}
+            onSendMessage={handleSendMessage}
+          />
+        );
+      })()}
     </div>
   );
 };

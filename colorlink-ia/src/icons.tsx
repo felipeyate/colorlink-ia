@@ -79,11 +79,21 @@ import {
   Image,
   Home,
   ShoppingBag,
+  Calculator,
+  LogIn,
+  CheckCheck,
+  Smile,
+  Paperclip,
 } from 'lucide-react';
 
 export {
   Home,
   ShoppingBag,
+  Calculator,
+  LogIn,
+  CheckCheck,
+  Smile,
+  Paperclip,
 };
 
 export const LogoMark = ({ className = "w-5 h-5 text-teal-400" }: { className?: string }) => (

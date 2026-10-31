@@ -36,8 +36,13 @@ import {
   openInOutlook,
   openInEmailClient,
 } from '../emailService';
-import { GoogleSignInButton } from './GoogleSignInButton';
-import { isGoogleConnected, initAuth } from '../googleAuth';
+import {
+  isGoogleConnected,
+  initAuth,
+  googleSignIn,
+  getAccessToken,
+  ensureGoogleAccessToken,
+} from '../googleAuth';
 
 interface RegisterViewProps {
   onRegister: (user: UserProfile) => void;
@@ -108,12 +113,17 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
     };
   }, []);
 
-  // Reenviar notificación oficial al cliente
+  // Reenviar notificación oficial al cliente con soporte para asegurar token de Google
   const handleResendNotification = async (clientUser: UserProfile) => {
     setDeliveryStatus('sending');
-    setDeliveryMessage(`Procesando envío de notificación oficial a ${clientUser.email}...`);
+    setDeliveryMessage(`Conectando con Google y despachando notificación a ${clientUser.email}...`);
 
     try {
+      // Si no hay token de Google activo en memoria, solicitarlo
+      if (!isGoogleConnected()) {
+        await ensureGoogleAccessToken();
+      }
+
       const res = await sendWelcomeEmail(clientUser, {
         identification: identification || 'NIT-CLIENTE',
         address: address || 'Dirección registrada',
@@ -136,6 +146,76 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
     }
   };
 
+  // Registro directo con Google
+  const handleRegisterWithGoogle = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const authResult = await googleSignIn();
+      if (!authResult?.user) {
+        throw new Error('No se pudo completar el inicio de sesión con Google.');
+      }
+      const gUser = authResult.user;
+      const gEmail = (gUser.email || email).toLowerCase().trim();
+      const gName = gUser.displayName || name.trim() || 'Cliente ColorLink';
+      const fullAddress = address.trim() || `${city}, Colombia`;
+      const fullId = identification.trim() || `NIT-${Math.floor(Math.random() * 9000000 + 1000000)}`;
+
+      const newUser: UserProfile = {
+        id: 'usr-' + Math.random().toString(36).substring(2, 7),
+        name: gName,
+        email: gEmail,
+        password: password.trim() || 'cliente123',
+        phone: phone.trim() || '3001234567',
+        company: company.trim() || 'Constructora / Cliente Particular',
+        role: 'cliente',
+        city,
+      };
+
+      // 1. Guardar en base de datos PostgreSQL / Supabase
+      await syncClientToSupabase({
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        password: newUser.password,
+        phone: newUser.phone,
+        address: fullAddress,
+        city: newUser.city,
+        identification: fullId,
+        role: 'cliente',
+        company: newUser.company,
+      });
+
+      // 2. Despachar correo oficial de bienvenida por Gmail API con el token recién obtenido
+      const sentWelcome = await sendWelcomeEmail(newUser, {
+        identification: fullId,
+        address: fullAddress,
+      });
+
+      if (sentWelcome.dispatchedViaGmailApi) {
+        setDeliveryStatus('gmail_delivered');
+        setGmailMsgId(sentWelcome.gmailMessageId || null);
+        setDeliveryMessage(`¡Correo oficial entregado a ${newUser.email} mediante la API de Google Gmail! (ID: ${sentWelcome.gmailMessageId})`);
+      } else {
+        setDeliveryStatus('network_delivered');
+        setDeliveryMessage(`¡Notificación oficial enviada al correo de ${newUser.email}!`);
+      }
+
+      setIsLoading(false);
+      setConfirmationData({
+        userProfile: newUser,
+        identification: fullId,
+        address: fullAddress,
+        syncedToCloud: true,
+        message: `El cliente ${newUser.name} ha sido dado de alta formalmente en ColorLink y el correo oficial fue enviado a ${newUser.email}.`,
+        welcomeNotification: sentWelcome,
+      });
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err?.message || 'Error al registrarse con Google. Por favor completa el formulario manual.');
+    }
+  };
+
   // Copiar contenido del correo oficial al portapapeles
   const handleCopyEmail = (emailItem?: EmailNotification) => {
     if (!emailItem) return;
@@ -147,10 +227,23 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim() || !password.trim() || !phone.trim()) {
+    if (!name.trim() || !email.trim() || !password.trim() || !phone.trim() || !identification.trim()) {
       setError('Por favor complete los campos obligatorios marcados con asterisco (*).');
       return;
     }
+
+    const cleanId = identification.trim().replace(/\D/g, '');
+    if (cleanId.length !== 10) {
+      setError('El NIT o Cédula de Ciudadanía debe tener exactamente 10 números (solo dígitos).');
+      return;
+    }
+
+    const cleanPhone = phone.trim().replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setError('El teléfono / WhatsApp de contacto debe tener exactamente 10 números (solo dígitos).');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('Las contraseñas ingresadas no coinciden.');
       return;
@@ -164,16 +257,14 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
     setIsLoading(true);
 
     const fullAddress = address.trim() || `${city}, Colombia`;
-    const fullId =
-      identification.trim() ||
-      `NIT-${Math.floor(Math.random() * 9000000 + 1000000)}`;
+    const fullId = cleanId;
 
     const newUser: UserProfile = {
       id: 'usr-' + Math.random().toString(36).substring(2, 7),
       name: name.trim(),
       email: email.trim().toLowerCase(),
       password,
-      phone: phone.trim(),
+      phone: cleanPhone,
       company: company.trim() || 'Constructora / Cliente Particular',
       role: 'cliente',
       city,
@@ -182,17 +273,28 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
     try {
       // 1. Guardar en base de datos PostgreSQL (tablas public.clientes y public.usuarios)
       await syncClientToSupabase({
+        id: newUser.id,
         name: newUser.name,
         email: newUser.email,
         password: newUser.password,
         phone: newUser.phone,
         address: fullAddress,
+        city: newUser.city,
         identification: fullId,
         role: 'cliente',
         company: newUser.company,
       });
 
-      // 2. ENVIAR CORREO OFICIAL AL CLIENTE (con soporte para Gmail API o Webmail directo)
+      // 2. Si el correo ingresado es de Gmail o no hay token de Google activo, intentar conectar Google para despacho automático
+      if (!isGoogleConnected()) {
+        try {
+          await ensureGoogleAccessToken();
+        } catch (gErr) {
+          console.info('Autorización de Google omitida en envío de formulario:', gErr);
+        }
+      }
+
+      // 3. ENVIAR CORREO OFICIAL AL CLIENTE (con soporte para Gmail API o Webmail directo)
       const sentWelcome = await sendWelcomeEmail(newUser, {
         identification: fullId,
         address: fullAddress,
@@ -289,163 +391,6 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
           <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
             El cliente ha sido dado de alta en las tablas de la base de datos y sus credenciales de acceso al portal están listas.
           </p>
-        </div>
-
-        {/* =========================================================================
-            MÓDULO DESTACADO: ENVÍO REAL DEL CORREO AL CLIENTE REGISTRADO
-           ========================================================================= */}
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-blue-50/80 via-white to-sky-50/60 border-2 border-blue-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-blue-100">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <Mail className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <span className="font-bold text-blue-950 text-sm block">
-                  Despacho del Correo al Cliente Registrado
-                </span>
-                <span className="text-xs text-slate-600">
-                  Destinatario: <strong className="font-mono text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded font-bold">{userProfile.email}</strong>
-                </span>
-              </div>
-            </div>
-            <span className="text-[10px] font-mono font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full border border-blue-200">
-              BANDEJA DE ENTRADA REAL
-            </span>
-          </div>
-
-          {/* Banner de Estado del Envío */}
-          {deliveryStatus === 'gmail_delivered' ? (
-            <div className="p-4 bg-blue-50 border border-blue-300 rounded-xl space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 text-blue-950 font-bold text-xs">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>¡Mensaje Entregado Realmente a través de Google Gmail API!</span>
-                </div>
-                <span className="text-[10px] font-mono font-bold bg-blue-600 text-white px-2.5 py-0.5 rounded-full">
-                  ENTREGADO EN NUBE
-                </span>
-              </div>
-              <p className="text-xs text-blue-900 leading-relaxed">
-                El correo oficial de bienvenida con credenciales y catálogo fue enviado directamente a <strong className="font-mono font-bold">{userProfile.email}</strong> desde los servidores de Google.
-                {gmailMsgId && (
-                  <span className="block mt-1 font-mono text-[10px] text-blue-700">
-                    ID de confirmación de Google: {gmailMsgId}
-                  </span>
-                )}
-              </p>
-            </div>
-          ) : deliveryStatus === 'network_delivered' ? (
-            <div className="p-4 bg-blue-50 border border-blue-300 rounded-xl space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 text-blue-950 font-bold text-xs">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>¡Notificación Oficial Enviada al Correo de {userProfile.name}!</span>
-                </div>
-                <span className="text-[10px] font-mono font-bold bg-blue-600 text-white px-2.5 py-0.5 rounded-full">
-                  DESPACHADO A BANDEJA
-                </span>
-              </div>
-              <p className="text-xs text-blue-900 leading-relaxed">
-                El correo oficial de bienvenida y credenciales de acceso fue despachado exitosamente hacia <strong className="font-mono font-bold">{userProfile.email}</strong>. Revisa la bandeja de entrada (o carpeta de spam/promociones).
-              </p>
-            </div>
-          ) : (
-            <div className="p-4 bg-sky-50/70 border border-sky-200 rounded-xl space-y-2.5">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 text-blue-950 font-bold text-xs">
-                  <Send className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Enviar Mensaje Real al Correo del Cliente Ahora</span>
-                </div>
-                <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200">
-                  LISTO PARA ENVIAR
-                </span>
-              </div>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                El correo oficial con credenciales y beneficios fue generado para <strong className="font-mono text-blue-950 font-bold">{userProfile.email}</strong>. Puedes enviarlo directamente a su bandeja con un solo clic:
-              </p>
-            </div>
-          )}
-
-          {/* Botones de Envío Real al Correo */}
-          <div className="space-y-2.5 pt-1">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-              {/* Botón Principal: Abrir y Enviar en Gmail Web */}
-              <a
-                href={gmailUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all hover:shadow cursor-pointer"
-                id="btn-open-gmail-web-client"
-              >
-                <Mail className="w-4 h-4" />
-                <span>Enviar con Gmail Web a {userProfile.email}</span>
-                <ExternalLink className="w-3.5 h-3.5 ml-0.5 opacity-80" />
-              </a>
-
-              {/* Botón Outlook */}
-              <a
-                href={outlookUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                title="Abrir en Outlook Web"
-              >
-                <span>Outlook Web</span>
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              </a>
-
-              {/* Botón App de Correo (Mailto) */}
-              <a
-                href={mailtoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                title="Abrir en tu app de correo predeterminada (Thunderbird, Mail de Mac, Outlook App)"
-              >
-                <span>App de Correo</span>
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              </a>
-            </div>
-
-            {/* Opciones secundarias: Copiar y Reenviar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-blue-100 text-[11px] text-slate-600">
-              <button
-                type="button"
-                onClick={() => handleCopyEmail(welcomeNotification)}
-                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer font-medium"
-              >
-                {copiedEmailText ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-blue-700 font-bold">¡Mensaje Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Copiar Asunto y Mensaje Oficial</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleResendNotification(userProfile)}
-                className="px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-700 rounded-lg border border-blue-200 flex items-center gap-1.5 transition-colors cursor-pointer font-bold"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
-                <span>Reintentar Despacho Automático</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Vista previa del Asunto Oficial */}
-          <div className="bg-white p-3 rounded-xl border border-blue-100 text-[11.5px] space-y-1">
-            <span className="font-bold text-slate-700 block">Asunto oficial preparado:</span>
-            <p className="font-semibold text-blue-900 italic">
-              "{emailSubject}"
-            </p>
-          </div>
         </div>
 
         {/* Estado en Base de Datos (PostgreSQL) */}
@@ -671,43 +616,6 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
         </div>
       )}
 
-      {/* Banner Informativo y Conector de Gmail API */}
-      <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-2">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-blue-950 font-bold">
-            <Mail className="w-4 h-4 text-blue-600 shrink-0" />
-            <span>Despacho al Correo Electrónico del Cliente:</span>
-          </div>
-          {googleUser?.email ? (
-            <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <Check className="w-3 h-3 text-blue-600" />
-              Gmail API Activa ({googleUser.email})
-            </span>
-          ) : (
-            <span className="text-[10px] font-mono font-bold bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
-              Entrega Webmail & API
-            </span>
-          )}
-        </div>
-        <p className="text-[11.5px] text-slate-600 leading-relaxed">
-          Al completar el formulario, ColorLink preparará y enviará inmediatamente el correo oficial con credenciales y beneficios a la dirección del cliente.
-        </p>
-
-        {!googleUser?.email && (
-          <div className="pt-1.5 flex items-center justify-between flex-wrap gap-2 border-t border-blue-100">
-            <span className="text-[10.5px] text-blue-900 font-medium">
-              ¿Deseas despacho automático en segundo plano por Gmail?
-            </span>
-            <GoogleSignInButton
-              compact
-              currentGoogleUser={googleUser}
-              onAuthSuccess={(u) => setGoogleUser({ email: u.email, displayName: u.displayName, photoURL: u.photoURL })}
-              onLogout={() => setGoogleUser(null)}
-            />
-          </div>
-        )}
-      </div>
-
       <form onSubmit={handleSubmit} id="register-form" className="space-y-3">
         <div className="field-row">
           <Field
@@ -721,10 +629,10 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
           />
           <Field
             id="register-id"
-            label="NIT o Cédula de Ciudadanía *"
+            label="NIT o Cédula de Ciudadanía (10 dígitos) *"
             value={identification}
             onChange={(e) => {
-              const numericOnly = e.target.value.replace(/\D/g, '');
+              const numericOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
               setIdentification(numericOnly);
             }}
             onKeyDown={(e) => {
@@ -734,15 +642,16 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
               ) {
                 return;
               }
-              if (!/^[0-9]$/.test(e.key)) {
+              if (!/^[0-9]$/.test(e.key) || identification.length >= 10) {
                 e.preventDefault();
               }
             }}
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder="Ej. 901884221 o 1098765432 (Solo números)"
+            maxLength={10}
+            placeholder="Ej. 1098765432 (10 dígitos)"
             icon={<ShieldCheck className="w-4 h-4" />}
-            hint="Solo números permitidos (sin letras, puntos ni guiones)"
+            hint="Permite exactamente 10 números (sin letras ni signos)"
             required
           />
         </div>
@@ -761,11 +670,11 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
 
           <Field
             id="register-phone"
-            label="Teléfono / WhatsApp de Contacto *"
+            label="Teléfono / WhatsApp de Contacto (10 dígitos) *"
             type="tel"
             value={phone}
             onChange={(e) => {
-              const numericOnly = e.target.value.replace(/\D/g, '');
+              const numericOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
               setPhone(numericOnly);
             }}
             onKeyDown={(e) => {
@@ -775,16 +684,16 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
               ) {
                 return;
               }
-              if (!/^[0-9]$/.test(e.key)) {
+              if (!/^[0-9]$/.test(e.key) || phone.length >= 10) {
                 e.preventDefault();
               }
             }}
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={15}
-            placeholder="Ej. 3001234567 (Solo números)"
+            maxLength={10}
+            placeholder="Ej. 3001234567 (10 dígitos)"
             icon={<Phone className="w-4 h-4" />}
-            hint="Solo dígitos numéricos (sin letras ni espacios)"
+            hint="Permite exactamente 10 números (solo dígitos)"
             required
           />
         </div>

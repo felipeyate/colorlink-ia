@@ -35,11 +35,17 @@ import {
   Bell,
   ShoppingBag,
 } from '../icons';
+import { MainNavbar } from './MainNavbar';
 
 interface PintucoHomePageProps {
   currentUser: UserProfile | null;
   requests: PaintRequest[];
   inventory: WarehouseInventoryItem[];
+  cartCount?: number;
+  onOpenCart?: () => void;
+  onOpenTechnicalSheets?: () => void;
+  onNavigateAmbientes?: () => void;
+  emailUnreadCount?: number;
   onNavigateToLogin: () => void;
   onNavigateToRegister: () => void;
   onNavigateToPortal: () => void;
@@ -404,6 +410,11 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
   currentUser,
   requests,
   inventory,
+  cartCount = 0,
+  onOpenCart,
+  onOpenTechnicalSheets,
+  onNavigateAmbientes,
+  emailUnreadCount = 0,
   onNavigateToLogin,
   onNavigateToRegister,
   onNavigateToPortal,
@@ -418,7 +429,6 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
   onSelectCatalogItemAndBuy,
   onSelectSpaceAndQuote,
 }) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeFamily, setActiveFamily] = useState<string>('Todos');
   const [selectedSwatch, setSelectedSwatch] = useState<ColorSwatch>(COLOR_PALETTE[0]);
   const [customColorInput, setCustomColorInput] = useState<string>('#27CBD2');
@@ -443,11 +453,6 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
     }, 400);
   };
 
-  // Rastreo Rápido
-  const [trackingCode, setTrackingCode] = useState('');
-  const [trackedRequest, setTrackedRequest] = useState<PaintRequest | null>(null);
-  const [trackSearched, setTrackSearched] = useState(false);
-
   // Calculadora Rápida
   const [calcArea, setCalcArea] = useState<number>(65);
   const [calcSurface, setCalcSurface] = useState<SurfaceType>('mamposteria_interior');
@@ -456,18 +461,6 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
     activeFamily === 'Todos'
       ? COLOR_PALETTE
       : COLOR_PALETTE.filter((s) => s.family === activeFamily);
-
-  const handleSearchOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTrackSearched(true);
-    const codeClean = trackingCode.trim().toUpperCase();
-    const found = requests.find(
-      (r) =>
-        r.requestCode.toUpperCase() === codeClean ||
-        r.id.toUpperCase() === codeClean
-    );
-    setTrackedRequest(found || null);
-  };
 
   // Cálculo Rápido de Rendimiento
   const computeQuickCalculation = () => {
@@ -598,164 +591,47 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans antialiased">
       {/* ==========================================================
-          NAVBAR COLORLINK OFICIAL · ARMONÍA BLANCOS Y AZULES
+          NAVBAR COLORLINK OFICIAL · PLATAFORMA EMPRESARIAL
           ========================================================== */}
-      <header className="navbar-root shadow-xs sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-blue-100">
-        {/* Franja superior Azul Real & Celeste Vibrante */}
-        <div className="h-[2.5px] w-full bg-gradient-to-r from-blue-700 via-sky-500 to-indigo-600" />
-
-        <div className="navbar-container !max-w-full !px-3 sm:!px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
-          <button
-            type="button"
-            className="flex items-center gap-2.5 cursor-pointer group text-left transition-transform hover:scale-[1.01]"
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            title="Inicio ColorLink"
-          >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/40 shadow-xs flex items-center justify-center font-bold text-white text-sm font-['Space_Grotesk'] tracking-wide group-hover:rotate-[-3deg] transition-transform shrink-0">
-              CL
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5 leading-none">
-                <span className="font-bold text-lg text-slate-900 tracking-tight font-['Space_Grotesk']">ColorLink</span>
-              </div>
-              <span className="text-[9px] font-mono tracking-wider uppercase text-blue-600/80 font-semibold mt-0.5 hidden xs:inline">
-                Gestión Integral de Recubrimientos
-              </span>
-            </div>
-          </button>
-
-          <nav className={`navbar-links ${mobileMenuOpen ? 'is-open' : ''}`}>
-            <a href="#catalogo" onClick={() => setMobileMenuOpen(false)} className="!text-slate-900 font-bold hover:!text-blue-600 transition-colors">
-              Catálogo ({inventory.length})
-            </a>
-            <a href="#ambientes" onClick={() => setMobileMenuOpen(false)} className="hover:!text-blue-600 transition-colors">
-              Ambientes
-            </a>
-            <a href="#paleta-color" onClick={() => setMobileMenuOpen(false)} className="hover:!text-blue-600 transition-colors">
-              Paletas de Color
-            </a>
-            <a href="#calculadora" onClick={() => setMobileMenuOpen(false)} className="hover:!text-blue-600 transition-colors">
-              Calculadora m²
-            </a>
-            <a href="#proyectos" onClick={() => setMobileMenuOpen(false)} className="hover:!text-blue-600 transition-colors">
-              Proyectos
-            </a>
-            <a href="#rastreo" onClick={() => setMobileMenuOpen(false)} className="hover:!text-blue-600 transition-colors">
-              Rastrear Pedido
-            </a>
-
-            {/* Solo Administrador ve el acceso directo a Supabase */}
-            {currentUser?.role === 'administrador' && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenSupabaseModal();
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-blue-700 hover:text-blue-900 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200"
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>Supabase DB</span>
-              </button>
-            )}
-
-            {/* Acciones en móvil */}
-            <div className="navbar-mobile-actions">
-              {currentUser ? (
-                <button
-                  type="button"
-                  onClick={onNavigateToPortal}
-                  className="w-full py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs"
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>Mi Portal ({currentUser.name.split(' ')[0]})</span>
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={onNavigateToLogin}
-                    className="w-full py-2 px-4 rounded-xl bg-white hover:bg-blue-50 text-slate-700 font-semibold text-xs border border-slate-200"
-                  >
-                    Iniciar Sesión
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onNavigateToRegister}
-                    className="w-full py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs"
-                  >
-                    + Cotizar Proyecto
-                  </button>
-                </>
-              )}
-            </div>
-          </nav>
-
-          <div className="navbar-actions">
-            {currentUser && onOpenEmailInbox && (
-              <button
-                type="button"
-                onClick={onOpenEmailInbox}
-                className="px-3 py-1.5 rounded-full bg-white hover:bg-blue-50/80 text-slate-700 hover:text-blue-700 border border-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
-                title={`Notificaciones exclusivas de ${currentUser.email}`}
-                id="btn-home-nav-email-inbox"
-              >
-                <Bell className="w-3.5 h-3.5 text-blue-600" />
-                <span className="hidden sm:inline">Mis Notificaciones</span>
-              </button>
-            )}
-
-            {currentUser ? (
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <button
-                  type="button"
-                  onClick={onNavigateToPortal}
-                  className="px-3.5 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs border border-blue-700 cursor-pointer"
-                >
-                  <ShoppingBag className="w-3.5 h-3.5 text-white" />
-                  <span>Mi Portal ({currentUser.name.split(' ')[0]})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className="w-8 h-8 rounded-full bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors flex items-center justify-center cursor-pointer border border-slate-200"
-                  title="Cerrar sesión"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={onNavigateToLogin}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition-all cursor-pointer"
-                >
-                  Iniciar Sesión
-                </button>
-                <button
-                  type="button"
-                  onClick={onNavigateToRegister}
-                  className="px-4 py-1.5 rounded-full text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-xs transition-all cursor-pointer"
-                >
-                  + Cotizar Proyecto
-                </button>
-              </>
-            )}
-
-            <button
-              type="button"
-              className="navbar-burger cursor-pointer"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Abrir menú"
-            >
-              <span />
-              <span />
-              <span />
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* ==========================================================
+          NAVBAR COLORLINK OFICIAL · DISEÑO EXACTO SEGÚN LA IMAGEN
+          ========================================================== */}
+      <MainNavbar
+        currentUser={currentUser}
+        cartCount={cartCount}
+        activeSection="catalogo"
+        onNavigateHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        onNavigateCatalog={() => {
+          const el = document.getElementById('catalogo');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+          else window.scrollTo({ top: 900, behavior: 'smooth' });
+        }}
+        onOpenCalculator={onOpenCalculator}
+        onNavigatePalettes={() => {
+          const el = document.getElementById('paleta-color');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }}
+        onOpenTechnicalSheets={() => {
+          if (onOpenTechnicalSheets) onOpenTechnicalSheets();
+        }}
+        onNavigateAmbientes={() => {
+          const el = document.getElementById('ambientes');
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (onNavigateAmbientes) {
+            onNavigateAmbientes();
+          }
+        }}
+        onOpenCart={() => {
+          if (onOpenCart) onOpenCart();
+        }}
+        onNavigateLogin={onNavigateToLogin}
+        onNavigatePortal={onNavigateToPortal}
+        onLogout={onLogout}
+        onOpenSupabaseModal={onOpenSupabaseModal}
+        onOpenEmailInbox={onOpenEmailInbox}
+        emailUnreadCount={emailUnreadCount}
+      />
 
       {/* ==========================================================
           HERO SECTION
@@ -795,14 +671,6 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
               <span>Calculadora de Pintura m²</span>
             </button>
 
-            <button
-              type="button"
-              onClick={onOpenAiAssistant}
-              className="btn-ghost text-sm font-semibold flex items-center gap-1.5 hover:text-[#199ea5]"
-            >
-              <Sparkles className="w-4 h-4 text-[#27cbd2]" />
-              <span>Asesor Técnico IA 24/7</span>
-            </button>
           </div>
 
           <div className="hero-stats">
@@ -930,7 +798,7 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
       {/* ==========================================================
           CATEGORÍAS DE AMBIENTE (SHOP BY ROOM)
           ========================================================== */}
-      <section id="ambientes" className="section-block">
+      <section id="ambientes" className="section-block scroll-mt-24">
         <div className="section-header text-center">
           <div className="badge-pill">
             <Layers className="w-3.5 h-3.5 text-[#199ea5]" />
@@ -1963,106 +1831,7 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
         </div>
       </section>
 
-      {/* ==========================================================
-          RASTREO DE PEDIDO EN LÍNEA
-          ========================================================== */}
-      <section id="rastreo" className="section-block bg-[#f7f4ea] border-t border-[#e5e0d3]">
-        <div className="section-header text-center">
-          <div className="badge-pill !bg-[#fdf0b5]">
-            <Truck className="w-3.5 h-3.5 text-[#199ea5]" />
-            <span>LOGÍSTICA EN TIEMPO REAL</span>
-          </div>
-          <h2 className="section-title">Rastrea el despacho de tu orden</h2>
-          <p className="section-subtitle">
-            Ingresa tu código de proyecto (ej: OR-1001, OR-1002, OR-1003) para consultar la bodega de origen, el vehículo asignado y el estado de entrega a obra.
-          </p>
-        </div>
 
-        <div className="max-w-xl mx-auto">
-          <form onSubmit={handleSearchOrder} className="flex gap-2 mb-6">
-            <div className="input-wrap flex-1">
-              <Search className="input-icon w-4 h-4 text-[#8496a7]" />
-              <input
-                type="text"
-                value={trackingCode}
-                onChange={(e) => setTrackingCode(e.target.value)}
-                placeholder="Ingresa código ej. OR-1001"
-                className="text-xs font-mono uppercase"
-              />
-            </div>
-            <button type="submit" className="btn-primary btn-sm">
-              <span>Buscar</span>
-            </button>
-          </form>
-
-          {/* Resultado de búsqueda */}
-          {trackSearched && trackedRequest && (
-            <div className="bg-white border border-[#e5e0d3] rounded-2xl p-5 shadow-xs space-y-4 animate-fade-in">
-              <div className="flex items-center justify-between border-b border-[#e5e0d3] pb-3">
-                <div>
-                  <span className="text-[10px] font-mono text-[#8496a7] uppercase">
-                    Orden Encontrada
-                  </span>
-                  <h4 className="font-bold font-['Space_Grotesk'] text-[#2c3844] text-base">
-                    {trackedRequest.requestCode} · {trackedRequest.clientName}
-                  </h4>
-                </div>
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#86deb8]/30 text-[#173b2d] border border-[#86deb8]">
-                  {trackedRequest.deliveryDetails?.routeStatus || 'En ruta a obra'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <span className="text-[10px] text-[#8496a7] block">CEDI Origen:</span>
-                  <strong className="text-[#3d4b58]">
-                    {trackedRequest.inventoryAllocation?.warehouseName || 'CEDI Rionegro Principal'}
-                  </strong>
-                </div>
-                <div>
-                  <span className="text-[10px] text-[#8496a7] block">Vehículo / Placas:</span>
-                  <strong className="text-[#3d4b58] font-mono">
-                    {trackedRequest.deliveryDetails?.vehiclePlate || 'WOK-842 (Turbo Pintuco)'}
-                  </strong>
-                </div>
-                <div>
-                  <span className="text-[10px] text-[#8496a7] block">Conductor Asignado:</span>
-                  <strong className="text-[#3d4b58]">
-                    {trackedRequest.deliveryDetails?.driverName || 'Carlos Mario Jaramillo'}
-                  </strong>
-                </div>
-                <div>
-                  <span className="text-[10px] text-[#8496a7] block">Destino de Entrega:</span>
-                  <strong className="text-[#3d4b58]">
-                    {trackedRequest.deliveryAddress || `${trackedRequest.city}, Colombia`}
-                  </strong>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-[#e5e0d3] flex justify-end">
-                <button
-                  type="button"
-                  onClick={onNavigateToPortal}
-                  className="text-xs font-bold text-[#199ea5] hover:underline"
-                >
-                  Ver seguimiento completo en el portal →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {trackSearched && !trackedRequest && (
-            <div className="bg-white border border-[#e5e0d3] rounded-2xl p-4 text-center text-xs text-[#5a6d80]">
-              <p>
-                No se encontró ninguna orden con el código <strong>"{trackingCode}"</strong>.
-              </p>
-              <p className="text-[11px] text-[#8496a7] mt-1">
-                Prueba buscando con los códigos demo activos: <span className="font-mono font-bold text-[#199ea5]">OR-1001</span> o <span className="font-mono font-bold text-[#199ea5]">OR-1002</span>.
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
 
       {/* ==========================================================
           GALERÍA DE PROYECTOS REALES
@@ -2172,14 +1941,6 @@ export const PintucoHomePage: React.FC<PintucoHomePageProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
 
-            <button
-              type="button"
-              onClick={onOpenAiAssistant}
-              className="btn-secondary btn-lg !bg-white/10 !text-white !border-white/20 hover:!bg-white/20 whitespace-nowrap"
-            >
-              <Sparkles className="w-4 h-4 text-[#86deb8]" />
-              <span>Hablar con Asesor IA</span>
-            </button>
           </div>
         </div>
       </section>

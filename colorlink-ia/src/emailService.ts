@@ -114,7 +114,7 @@ export async function requestDesktopNotificationPermission(): Promise<boolean> {
   return false;
 }
 
-// Enviar y registrar un correo con soporte para despacho real mediante Gmail API y clientes de correo
+// Enviar y registrar un correo con soporte para backend de servidor, Gmail API y webmail
 export async function sendEmail(
   payload: Omit<EmailNotification, 'id' | 'sentAt' | 'read'>
 ): Promise<EmailNotification> {
@@ -165,48 +165,53 @@ export async function sendEmail(
     console.warn('[ColorLink Mailer] Error de comunicación con Gmail API:', err);
   }
 
-  // 2. Despacho directo a la red de correo para entrega directa en la bandeja de entrada del cliente
+  // 2. Despacho a través del backend propio Express (/api/send-email)
   try {
     const cleanTo = (newEmail.toEmail || '').trim().toLowerCase();
     if (cleanTo && cleanTo.includes('@')) {
-      console.info(`[ColorLink Mailer] 📡 Enviando notificación real a la bandeja de ${cleanTo} mediante red de correo...`);
-      const netPromise = fetch(`https://formsubmit.co/ajax/${encodeURIComponent(cleanTo)}`, {
+      console.info(`[ColorLink Mailer] 📡 Despachando notificación a ${cleanTo} mediante /api/send-email...`);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const backendPromise = fetch('/api/send-email', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
-          _subject: newEmail.subject,
-          _template: 'table',
-          _captcha: 'false',
-          _replyto: 'contacto@colorlink.com',
-          Plataforma: 'ColorLink S.A. · Red de Logística y Pintura Inteligente',
-          Cliente_Destinatario: `${newEmail.toName} <${newEmail.toEmail}>`,
-          Asunto: newEmail.subject,
-          Resumen_Notificacion: newEmail.previewText || 'Notificación oficial de bienvenida y credenciales de acceso a ColorLink',
-          Portal_Oficial: typeof window !== 'undefined' ? window.location.origin : 'https://colorlink.com',
-          Fecha_Despacho: new Date().toLocaleString('es-CO'),
+          toEmail: cleanTo,
+          toName: newEmail.toName,
+          subject: newEmail.subject,
+          previewText: newEmail.previewText,
+          category: newEmail.category,
+          requestCode: newEmail.requestCode,
+          htmlContent: newEmail.htmlContent,
         }),
       }).then(async (res) => {
         const data = await res.json().catch(() => null);
-        console.info('[ColorLink Mailer] 📬 Respuesta del servidor de entrega de correo:', data);
-        newEmail.dispatchedViaNetwork = true;
-        newEmail.networkDeliveryStatus = data?.message || 'Notificación despachada al correo del cliente';
+        if (data && data.success) {
+          newEmail.dispatchedViaNetwork = true;
+          if (data.dispatchedViaGmailApi) {
+            newEmail.dispatchedViaGmailApi = true;
+            newEmail.gmailMessageId = data.messageId;
+          }
+          newEmail.networkDeliveryStatus = 'Despachado exitosamente al buzón del cliente';
+          console.info('[ColorLink Mailer] 📬 Despacho confirmado por servidor:', data);
+        }
       }).catch((err) => {
-        console.warn('[ColorLink Mailer] Despacho por red de correo secundario:', err);
+        console.warn('[ColorLink Mailer] Advertencia de despacho por backend:', err);
       });
 
-      // Si no fue despachado por Gmail API, esperamos el despacho de red con timeout de 2.5s
-      if (!newEmail.dispatchedViaGmailApi) {
-        await Promise.race([
-          netPromise,
-          new Promise((resolve) => setTimeout(resolve, 2500)),
-        ]);
-      }
+      // Timeout preventivo de 1.5s para no bloquear la experiencia de usuario
+      await Promise.race([
+        backendPromise,
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
     }
-  } catch (netErr) {
-    console.warn('[ColorLink Mailer] Error despachando a la red:', netErr);
+  } catch (backendErr) {
+    console.warn('[ColorLink Mailer] Error despachando por backend:', backendErr);
   }
 
   // Guardar en almacenamiento persistente
@@ -807,3 +812,73 @@ export async function sendOrderDeliveredEmail(
     },
   });
 }
+
+// Enviar correo de recuperación de contraseña con nueva clave generada
+export async function sendPasswordRecoveryEmail(
+  clientUser: { name: string; email: string },
+  newPasswordCode: string
+): Promise<EmailNotification> {
+  const subject = `🔐 Recuperación de Contraseña ColorLink · Nueva clave: ${newPasswordCode}`;
+  const previewText = `Hola ${clientUser.name}, tu nueva contraseña para ingresar a ColorLink es: ${newPasswordCode}. Úsala para acceder a tu portal.`;
+
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+      <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 28px 24px; text-align: center; color: #ffffff;">
+        <div style="display: inline-block; width: 44px; height: 44px; line-height: 44px; background: rgba(255,255,255,0.2); border-radius: 12px; font-size: 22px; margin-bottom: 8px;">
+          🔐
+        </div>
+        <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em;">ColorLink · Seguridad</h1>
+        <p style="margin: 6px 0 0; font-size: 13px; opacity: 0.9;">Recuperación Oficial de Contraseña</p>
+      </div>
+
+      <div style="padding: 26px 24px;">
+        <p style="font-size: 14px; color: #334155; margin: 0 0 16px;">
+          Hola <strong>${clientUser.name}</strong>,
+        </p>
+        <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 0 0 20px;">
+          Hemos recibido una solicitud para restablecer la contraseña de acceso a tu portal de cliente en ColorLink. Se ha generado una nueva contraseña segura para que puedas ingresar de inmediato:
+        </p>
+
+        <div style="background: #eff6ff; border: 2px dashed #3b82f6; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0;">
+          <span style="font-size: 11px; font-weight: 700; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px;">
+            Tu Nueva Contraseña de Acceso
+          </span>
+          <span style="font-family: monospace; font-size: 24px; font-weight: 800; color: #1e3a8a; letter-spacing: 2px;">
+            ${newPasswordCode}
+          </span>
+          <p style="font-size: 11px; color: #60a5fa; margin: 6px 0 0;">
+            Copia esta clave e ingrésala en la pantalla de inicio de sesión
+          </p>
+        </div>
+
+        <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 16px 0;">
+          Cuenta vinculada: <strong style="color: #0f172a;">${clientUser.email}</strong>
+        </p>
+
+        <div style="text-align: center; margin: 24px 0 10px;">
+          <a href="${typeof window !== 'undefined' ? window.location.origin : 'https://colorlink.com'}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 700; padding: 12px 28px; border-radius: 10px; box-shadow: 0 2px 6px rgba(37,99,235,0.3);">
+            Ir a Iniciar Sesión en ColorLink →
+          </a>
+        </div>
+      </div>
+
+      <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 14px 24px; text-align: center; font-size: 11px; color: #94a3b8;">
+        ColorLink S.A. · Tu nueva contraseña ya está registrada en el sistema.
+      </div>
+    </div>
+  `;
+
+  return sendEmail({
+    toEmail: clientUser.email,
+    toName: clientUser.name,
+    subject,
+    previewText,
+    htmlContent,
+    category: 'bienvenida',
+    metadata: {
+      action: 'password_recovery',
+      newPassword: newPasswordCode,
+    },
+  });
+}
+

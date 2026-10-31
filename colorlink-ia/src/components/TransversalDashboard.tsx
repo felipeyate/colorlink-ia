@@ -26,6 +26,7 @@ interface TransversalDashboardProps {
   requests: PaintRequest[];
   onSelectRequest: (req: PaintRequest) => void;
   onCreateNewRequest: () => void;
+  onNavigateToHome?: () => void;
   onOpenCalculator: () => void;
   onOpenAiAssistant: () => void;
   onOpenCertificate: (req: PaintRequest) => void;
@@ -36,6 +37,7 @@ export const TransversalDashboard: React.FC<TransversalDashboardProps> = ({
   requests,
   onSelectRequest,
   onCreateNewRequest,
+  onNavigateToHome,
   onOpenCalculator,
   onOpenAiAssistant,
   onOpenCertificate,
@@ -71,53 +73,54 @@ export const TransversalDashboard: React.FC<TransversalDashboardProps> = ({
   return (
     <div className="w-full max-w-6xl mx-auto py-2" id="transversal-dashboard-container">
       {/* Banner Superior: Contexto Institucional UCC & ColorLink */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 rounded-2xl shadow-sm mb-6 border border-blue-800/40 relative overflow-hidden">
-        {/* Glow sutil azul celeste */}
-        <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="bg-slate-900 text-white p-6 md:p-7 rounded-2xl shadow-xs mb-6 border border-slate-800 relative overflow-hidden">
+        {/* Glow sutil institucional */}
+        <div className="absolute -right-12 -bottom-12 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono text-[10.5px] uppercase tracking-wider bg-sky-400/20 text-sky-200 px-2.5 py-0.5 rounded-full border border-sky-400/30 font-bold">
-                Universidad Cooperativa de Colombia · Proyecto Transversal
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="font-mono text-[10px] uppercase tracking-wider bg-blue-500/20 text-blue-200 px-2 py-0.5 rounded border border-blue-400/30 font-semibold">
+                UNIVERSIDAD COOPERATIVA DE COLOMBIA · RETO ELECTIVA IV
               </span>
-              <span className="text-xs text-blue-200/80 font-mono">Semestre 2026</span>
+              <span className="text-xs text-slate-400 font-mono">Semestre 2026</span>
             </div>
-            <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1">
-              ColorLink · Transformación Digital Inteligente
+            <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1 tracking-tight">
+              ColorLink · Ecosistema Transversal 360°
             </h1>
-            <p className="text-xs text-blue-100/80 max-w-3xl mt-1 leading-relaxed">
-              Ecosistema integral que resuelve la fragmentación técnica, comercial y operativa: integrando requerimiento, solución técnica, inventario, cuadrilla de servicio y garantía de calidad.
+            <p className="text-xs text-slate-300 max-w-3xl mt-1 leading-relaxed">
+              Plataforma integral que resuelve la fragmentación técnica, comercial y operativa: integrando requerimiento, formulación técnica, inventario en CEDI, servicio de despacho y garantía de calidad certificada.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {onNavigateToHome && (
+              <button
+                type="button"
+                onClick={onNavigateToHome}
+                className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer border border-slate-700"
+                id="btn-dash-back-home"
+              >
+                <span>← Catálogo & Inicio</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onCreateNewRequest}
-              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+              className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer border border-blue-500"
               id="btn-dash-new-request"
             >
-              <PlusCircle className="w-4 h-4" />
-              Nueva Solicitud
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Nueva Solicitud</span>
             </button>
             <button
               type="button"
               onClick={onOpenCalculator}
-              className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 border border-white/20 transition-all cursor-pointer"
+              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition-all cursor-pointer shadow-2xs"
               id="btn-dash-calculator"
             >
-              <Sliders className="w-4 h-4 text-sky-300" />
-              Calculadora
-            </button>
-            <button
-              type="button"
-              onClick={onOpenAiAssistant}
-              className="px-3.5 py-2 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
-              id="btn-dash-ai"
-            >
-              <Sparkles className="w-4 h-4" />
-              Asistente IA
+              <Sliders className="w-3.5 h-3.5 text-slate-400" />
+              <span>Calculadora m²</span>
             </button>
           </div>
         </div>

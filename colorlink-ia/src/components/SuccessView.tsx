@@ -211,11 +211,14 @@ export const SuccessView: React.FC<SuccessViewProps> = ({
             if (onOpenInvoiceModal) onOpenInvoiceModal();
             else setShowInvoice(true);
           }}
-          className="btn-primary !bg-slate-900 hover:!bg-slate-800 text-white w-full text-xs flex items-center justify-center gap-1.5 shadow-xs"
+          style={{ color: '#000000' }}
+          className="w-full text-xs flex items-center justify-center gap-2 shadow-md py-2.5 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-black border-2 border-black cursor-pointer transition-all"
           id="btn-download-invoice-pdf"
         >
-          <Receipt className="w-4 h-4 text-teal-400" />
-          📄 Descargar Factura Electrónica (PDF)
+          <Receipt className="w-4 h-4 text-black" style={{ color: '#000000' }} />
+          <span style={{ color: '#000000' }} className="text-black font-black">
+            📄 Descargar Factura Electrónica (PDF)
+          </span>
         </button>
 
         <div className="grid grid-cols-2 gap-2">

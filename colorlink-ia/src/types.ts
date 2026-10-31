@@ -18,6 +18,7 @@ export interface UserProfile {
   role: UserRole;
   phone: string;
   city: string;
+  address?: string;
   badgeNumber?: string;
   vehiclePlate?: string;
 }
@@ -188,6 +189,17 @@ export interface PaintRequest {
     warrantyExpirationDate: string;
   };
   invoiceDetails?: InvoiceDetails;
+  chatMessages?: OrderChatMessage[];
+}
+
+export interface OrderChatMessage {
+  id: string;
+  senderRole: 'conductor' | 'cliente' | 'administrador';
+  senderName: string;
+  message: string;
+  timestamp: string;
+  createdAtIso?: string;
+  isReadByOther?: boolean;
 }
 
 export interface InvoiceItem {

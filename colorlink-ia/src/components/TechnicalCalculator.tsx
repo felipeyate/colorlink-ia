@@ -249,11 +249,12 @@ export const TechnicalCalculator: React.FC<TechnicalCalculatorProps> = ({
             {onApplyCalculationToRequest && (
               <button
                 type="button"
+                id="btn-apply-calc-to-request"
                 onClick={() => onApplyCalculationToRequest(surfaceType, computedArea)}
-                className="btn-primary !bg-teal-500 hover:!bg-teal-400 !text-navy-900 w-full text-xs font-bold"
+                className="w-full py-3.5 px-4 rounded-xl font-black text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer active:scale-95"
               >
-                Crear Solicitud con este Cálculo
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>🎨 Crear Nueva Pintura con este Cálculo ({computedArea} m²)</span>
+                <ArrowRight className="w-4 h-4 text-slate-950" />
               </button>
             )}
           </div>

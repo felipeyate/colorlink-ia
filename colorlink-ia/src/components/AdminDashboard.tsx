@@ -12,8 +12,10 @@ import {
   syncPaintRequestToSupabase,
   syncAllRequestsToSupabase,
   syncClientToSupabase,
+  updateClientInDatabase,
   fetchClientsFromSupabase,
   fetchTableFromSupabase,
+  syncAllInventoryToSupabase,
   SupabaseConfig,
   DEFAULT_SUPABASE_KEY,
   normalizeSupabaseUrl,
@@ -334,6 +336,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Estados para Edición de Clientes
   const [editingClient, setEditingClient] = useState<any | null>(null);
   const [isEditClientModalOpen, setIsEditClientModalOpen] = useState(false);
+  const [isSavingClient, setIsSavingClient] = useState(false);
 
   // Estados para Edición de Operarios (Conductores & Empacadores)
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
@@ -347,6 +350,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [invStatusFilter, setInvStatusFilter] = useState('todos');
   const [invTypeFilter, setInvTypeFilter] = useState<'todos' | 'pinturas' | 'materiales'>('todos');
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [isSyncingInventory, setIsSyncingInventory] = useState(false);
 
   // Formulario maestro de agregador de productos (Pintura vs Materiales/Herramientas)
   const [productTypeMode, setProductTypeMode] = useState<'pintura' | 'material'>('pintura');
@@ -382,6 +386,113 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (onUpdateInventory) {
       onUpdateInventory(newList);
     }
+  };
+
+  // Estado para edición completa de productos existentes en inventario
+  const [editingProduct, setEditingProduct] = useState<WarehouseInventoryItem | null>(null);
+
+  // Estado para Recepción de Mercancía a Bodega / Entrada de Stock estilizada
+  const [stockEntryProduct, setStockEntryProduct] = useState<WarehouseInventoryItem | null>(null);
+  const [entryQty, setEntryQty] = useState<number>(50);
+  const [entryUnit, setEntryUnit] = useState<'cuñetes' | 'galones'>('cuñetes');
+  const [entryRemission, setEntryRemission] = useState<string>('');
+  const [entryReceiver, setEntryReceiver] = useState<string>('Javier Gómez (Jefe de Bodega)');
+
+  const handleConfirmStockEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stockEntryProduct) return;
+    const qty = Number(entryQty);
+    if (!qty || qty <= 0) {
+      setToast({ type: 'error', text: 'Por favor ingresa una cantidad adicional válida mayor a 0.' });
+      return;
+    }
+
+    const isPaint = isPaintProduct(stockEntryProduct);
+    const updated = inventoryList.map((i) => {
+      if (i.id === stockEntryProduct.id) {
+        if (isPaint) {
+          let newCunetes = i.cuñetesAvailable || 0;
+          let newGalones = i.galonesAvailable || 0;
+
+          if (entryUnit === 'cuñetes') {
+            newCunetes += qty;
+          } else {
+            newGalones += qty;
+          }
+          const newLiters = newCunetes * 18.9 + newGalones * 3.785;
+
+          return {
+            ...i,
+            cuñetesAvailable: newCunetes,
+            galonesAvailable: newGalones,
+            totalLiters: Math.round(newLiters),
+            status: 'optimo' as const,
+            lastUpdated: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          };
+        } else {
+          const currentUnits = i.unitsAvailable ?? i.galonesAvailable ?? 0;
+          const newUnits = currentUnits + qty;
+          return {
+            ...i,
+            unitsAvailable: newUnits,
+            galonesAvailable: newUnits,
+            totalLiters: newUnits,
+            status: 'optimo' as const,
+            lastUpdated: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          };
+        }
+      }
+      return i;
+    });
+
+    updateInventoryState(updated);
+    const labelAdded = isPaint
+      ? entryUnit === 'cuñetes'
+        ? `${qty} Cuñetes (5 Gal)`
+        : `${qty} Galones (1 Gal)`
+      : `${qty} ${stockEntryProduct.unitMeasure || 'Unidades'}`;
+
+    const remInfo = entryRemission.trim() ? ` · Remisión ${entryRemission.trim()}` : '';
+
+    setToast({
+      type: 'success',
+      text: `✓ Entrada de bodega registrada: +${labelAdded} a "${stockEntryProduct.productName}" en sede ${stockEntryProduct.warehouseCity}${remInfo}. Guardado en base de datos.`,
+    });
+    setStockEntryProduct(null);
+  };
+
+  const handleSaveEditedProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    if (!editingProduct.productName.trim() || !editingProduct.sku.trim()) {
+      setToast({ type: 'error', text: 'El nombre y el SKU son obligatorios.' });
+      return;
+    }
+
+    const isPaint = isPaintProduct(editingProduct);
+    let totalLiters = editingProduct.totalLiters || 0;
+    if (isPaint) {
+      totalLiters = Math.round(
+        (editingProduct.cuñetesAvailable || 0) * 18.9 + (editingProduct.galonesAvailable || 0) * 3.785
+      );
+    } else {
+      totalLiters = editingProduct.unitsAvailable ?? editingProduct.galonesAvailable ?? 0;
+    }
+
+    const finalItem: WarehouseInventoryItem = {
+      ...editingProduct,
+      totalLiters,
+      lastUpdated: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    };
+
+    const updated = inventoryList.map((i) => (i.id === finalItem.id ? finalItem : i));
+    updateInventoryState(updated);
+    setEditingProduct(null);
+    setToast({
+      type: 'success',
+      text: `Producto "${finalItem.productName}" modificado y guardado con éxito en la base de datos.`,
+    });
   };
 
   // Supabase Config state & Live Testing
@@ -816,6 +927,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!editingClient) return;
 
+    setIsSavingClient(true);
+
     const sanitizedId = (editingClient.identification || '').replace(/\D/g, '');
     const sanitizedPhone = (editingClient.phone || '').replace(/\D/g, '');
 
@@ -826,17 +939,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    const updatedList = clientsList.map((c) => (c.id === editingClient.id ? updatedClient : c));
+    // 1. Guardar de forma persistente en la Base de Datos (Local y Supabase Cloud)
+    let syncSuccess = false;
+    try {
+      const syncRes = await updateClientInDatabase({
+        id: updatedClient.id,
+        name: updatedClient.name,
+        email: updatedClient.email,
+        originalEmail: editingClient.originalEmail || editingClient.email,
+        identification: updatedClient.identification,
+        originalIdentification: editingClient.originalIdentification || editingClient.identification,
+        phone: updatedClient.phone,
+        company: updatedClient.company,
+        city: updatedClient.city,
+        address: updatedClient.address,
+        password: updatedClient.password,
+      });
+      syncSuccess = syncRes.syncedToCloud;
+    } catch (err: any) {
+      console.error('Error al guardar cliente en base de datos:', err);
+    }
+
+    const finalClient = {
+      ...updatedClient,
+      syncedToSupabase: syncSuccess,
+    };
+
+    // 2. Actualizar estado de clientsList en el dashboard
+    const updatedList = clientsList.map((c) => (c.id === editingClient.id ? finalClient : c));
     setClientsList(updatedList);
     try {
       localStorage.setItem('colorlink_clients', JSON.stringify(updatedList));
     } catch {}
 
-    // Sincronizar en colorlink_users para inicio de sesión inmediato
+    // 3. Sincronizar en colorlink_users para inicio de sesión inmediato
     try {
       const rawUsers = localStorage.getItem('colorlink_users');
       const usersList: UserProfile[] = rawUsers ? JSON.parse(rawUsers) : [];
-      const userIdx = usersList.findIndex((u) => u.email.toLowerCase() === editingClient.email.toLowerCase() || u.id === editingClient.id);
+      const userIdx = usersList.findIndex(
+        (u) =>
+          (editingClient.id && u.id === editingClient.id) ||
+          u.email.toLowerCase() === (editingClient.originalEmail || editingClient.email).toLowerCase() ||
+          u.email.toLowerCase() === updatedClient.email.toLowerCase()
+      );
       const updatedUser: UserProfile = {
         id: editingClient.id,
         name: updatedClient.name,
@@ -845,6 +990,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         company: updatedClient.company,
         role: 'cliente',
         city: updatedClient.city,
+        address: updatedClient.address,
         ...(updatedClient.password ? { password: updatedClient.password } : {}),
       };
       if (userIdx >= 0) {
@@ -855,24 +1001,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       localStorage.setItem('colorlink_users', JSON.stringify(usersList));
     } catch {}
 
-    // Sincronizar en Supabase si está conectado
-    try {
-      await syncClientToSupabase({
-        name: updatedClient.name,
-        email: updatedClient.email,
-        phone: updatedClient.phone,
-        address: updatedClient.address,
-        identification: updatedClient.identification,
-        role: 'cliente',
-        company: updatedClient.company,
-        password: updatedClient.password,
-      });
-    } catch {}
+    // 4. Si el usuario actual en sesión es este cliente, refrescar sus datos
+    if (currentUser && (currentUser.id === editingClient.id || currentUser.email.toLowerCase() === (editingClient.originalEmail || editingClient.email).toLowerCase())) {
+      currentUser.name = updatedClient.name;
+      currentUser.email = updatedClient.email;
+      currentUser.city = updatedClient.city;
+      currentUser.company = updatedClient.company;
+      currentUser.phone = updatedClient.phone;
+    }
 
+    // 5. Si la pestaña de explorador de tablas de Supabase está activa, refrescar los datos
+    if (adminTab === 'supabase' && supabaseSubTab === 'tablas') {
+      handleLoadTableData(selectedErdTable);
+    }
+
+    setIsSavingClient(false);
     setIsEditClientModalOpen(false);
     setToast({
       type: 'success',
-      text: `¡Datos del cliente "${updatedClient.name}" actualizados exitosamente!`,
+      text: syncSuccess
+        ? `¡Datos del cliente "${updatedClient.name}" guardados y sincronizados con éxito en la base de datos (PostgreSQL/Supabase)!`
+        : `¡Datos del cliente "${updatedClient.name}" guardados con éxito en la base de datos (public.clientes y public.usuarios)!`,
     });
     setEditingClient(null);
   };
@@ -1059,13 +1208,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     let syncNotice = '';
     try {
       const syncRes = await syncClientToSupabase({
+        id: newClientObj.id,
         name: newClientObj.name,
         email: newClientObj.email,
         phone: newClientObj.phone,
         address: newClientObj.address,
+        city: newClientObj.city,
         identification: newClientObj.identification,
         role: 'cliente',
         company: newClientObj.company,
+        password: 'cliente123',
       });
 
       if (syncRes.success) {
@@ -1132,13 +1284,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsSyncingClientMap((prev) => ({ ...prev, [cli.id]: true }));
     try {
       const res = await syncClientToSupabase({
+        id: cli.id,
         name: cli.name,
         email: cli.email,
         phone: cli.phone,
         address: cli.address,
+        city: cli.city || 'Medellín',
         identification: cli.identification,
         role: 'cliente',
         company: cli.company,
+        password: cli.password || 'cliente123',
       });
 
       if (res.success) {
@@ -1181,13 +1336,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Generador de datos relacionales locales para visualizar las 12 tablas
   const getLocalTablePreview = (tableName: string) => {
     switch (tableName) {
-      case 'usuarios':
+      case 'usuarios': {
+        const storedUsers = localStorage.getItem('colorlink_users');
+        let users: any[] = [];
+        if (storedUsers) {
+          try {
+            users = JSON.parse(storedUsers);
+          } catch {}
+        }
+        if (users && users.length > 0) {
+          return users.map((u: any) => ({
+            id_usuario: u.id,
+            nombre: u.name,
+            direccion: u.address ? `${u.address} (${u.city || 'Medellín'})` : `${u.city || 'Medellín'}, Colombia`,
+            email: u.email,
+            telefono: u.phone || '3000000000',
+            rol: u.role || 'cliente',
+            estado: 'activo',
+          }));
+        }
         return [
           { id_usuario: 'u1-admin', nombre: 'Ing. Carlos Restrepo', direccion: 'Cra 43A #1-50, Medellín', email: 'admin@pintuco.com', telefono: '3104567890', rol: 'administrador', estado: 'activo' },
           { id_usuario: 'u2-pack', nombre: 'Javier Gómez', direccion: 'CEDI Rionegro Km 2', email: 'empacador@pintuco.com', telefono: '3129876543', rol: 'empacador', estado: 'activo' },
           { id_usuario: 'u3-driv', nombre: 'Wilson Cañas', direccion: 'CEDI Siberia Muelle 4', email: 'conductor@pintuco.com', telefono: '3157654321', rol: 'conductor', estado: 'activo' },
           { id_usuario: 'u4-clie', nombre: 'Constructora Bolívar S.A.', direccion: 'Calle 98 #11-20, Bogotá', email: 'cliente@pintuco.com', telefono: '3201122334', rol: 'cliente', estado: 'activo' },
         ];
+      }
       case 'canales':
         return [
           { id_canal: 'c1', nombre_canal: 'Directo Pintuco S.A.' },
@@ -1195,15 +1369,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           { id_canal: 'c3', nombre_canal: 'Ferretería & Distribuidor Aliado' },
           { id_canal: 'c4', nombre_canal: 'Constructor VIP' },
         ];
-      case 'clientes':
-        return requests.map((r, idx) => ({
-          id_cliente: `cl-${idx + 1}`,
-          n_identificacion: `NIT-900.${idx + 1}23.456-7`,
-          nombre: r.clientName,
-          direccion: r.deliveryAddress,
-          email: r.clientEmail,
-          telefono: r.clientPhone,
+      case 'clientes': {
+        const stored = localStorage.getItem('colorlink_clients');
+        const list = stored ? JSON.parse(stored) : clientsList;
+        return list.map((c: any, idx: number) => ({
+          id_cliente: c.id || `cl-${idx + 1}`,
+          n_identificacion: c.identification || `NIT-900.${idx + 1}23.456-7`,
+          nombre: c.name,
+          direccion: c.address
+            ? (c.address.toLowerCase().includes((c.city || '').toLowerCase()) ? c.address : `${c.address} (${c.city || 'Medellín'})`)
+            : `${c.city || 'Medellín'}, Colombia`,
+          email: c.email,
+          telefono: c.phone,
         }));
+      }
       case 'proyectos':
         return requests.map((r, idx) => ({
           id_proyecto: `proj-${idx + 1}`,
@@ -1226,23 +1405,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           color: r.colorName,
         }));
       case 'inventario':
-        return inventoryList.map((i) => ({
-          id_material: i.id,
-          sku: i.sku,
-          nombre: i.productName,
-          tipo: i.category,
-          stock: i.cuñetesAvailable,
-          precio: 245000,
-          bodega_cedi: i.warehouseName,
-        }));
-      case 'materiales':
-        return requests.map((r, idx) => ({
-          id_material: `mat-${idx + 1}`,
-          id_solicitud: `sol-${idx + 1}`,
+        return inventoryList.map((i) => {
+          const isPaint = isPaintProduct(i);
+          const stock = isPaint
+            ? ((i.cuñetesAvailable || 0) * 5 + (i.galonesAvailable || 0))
+            : (i.unitsAvailable ?? i.galonesAvailable ?? 120);
+          const unitPrice = i.unitPrice ?? i.pricePerGalon ?? 89900;
+          return {
+            id_material: i.id,
+            sku: i.sku,
+            nombre: i.productName,
+            tipo: i.category,
+            stock: `${stock} ${isPaint ? 'Galones' : 'Unidades'}`,
+            precio_cop: unitPrice,
+            bodega_cedi: `${i.warehouseCity} · ${i.warehouseName}`,
+            estado: (i.status || 'optimo').toUpperCase(),
+          };
+        });
+      case 'materiales': {
+        const reqMats = requests.map((r, idx) => ({
+          id_material: `mat-req-${idx + 1}`,
+          solicitud_o_origen: `Orden ${r.requestCode}`,
           nombre: r.technicalCalculation?.recommendedProduct.name || 'Viniltex Avanzada',
-          cantidad: (r.technicalCalculation?.totalCuñetes || 1) + (r.technicalCalculation?.remainderGalons || 0),
+          cantidad: `${(r.technicalCalculation?.totalCuñetes || 1) + (r.technicalCalculation?.remainderGalons || 0)} Cuñetes/Gal`,
           nom_empacador: r.packagingDetails?.packerName || 'Javier Gómez (CEDI)',
+          ubicacion_cedi: r.city || 'Medellín',
         }));
+        const toolsAndMaterials = inventoryList
+          .filter((i) => !isPaintProduct(i) || i.unitType === 'herramienta' || i.unitType === 'insumo')
+          .map((mat) => ({
+            id_material: mat.id,
+            solicitud_o_origen: `Stock CEDI ${mat.warehouseCity}`,
+            nombre: mat.productName,
+            cantidad: `${mat.unitsAvailable ?? mat.galonesAvailable ?? 150} Unidades`,
+            nom_empacador: `Muelle CEDI ${mat.warehouseCity}`,
+            ubicacion_cedi: mat.warehouseCity,
+          }));
+        return [...reqMats, ...toolsAndMaterials];
+      }
       case 'pedidos':
         return requests.map((r, idx) => ({
           id_pedido: `ped-${idx + 1}`,
@@ -1314,146 +1514,153 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="w-full max-w-7xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto space-y-6" id="admin-dashboard-root">
-      {/* Banner Principal del Administrador */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white rounded-2xl p-6 shadow-sm border border-blue-800/40 relative overflow-hidden">
-        {/* Glow sutil azul celeste */}
-        <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+      {/* Banner Principal del Administrador · Centro de Control Logístico */}
+      <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-7 shadow-xs border border-slate-800 relative overflow-hidden">
+        {/* Glow sutil institucional */}
+        <div className="absolute -right-12 -bottom-12 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-sky-300">
-              <ShieldCheck className="w-6 h-6" />
+        <div className="flex flex-wrap items-center justify-between gap-5 relative z-10">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-600/90 text-white flex items-center justify-center font-bold shadow-xs shrink-0 border border-blue-400/30">
+              <ShieldCheck className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-sky-400/20 text-sky-200 border border-sky-400/30 font-bold">
-                  ADMINISTRACIÓN GENERAL & CONTROL 360° · COLORLINK
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-400/30 font-semibold">
+                  PANEL DE CONTROL GENERAL · COLORLINK CEDI
                 </span>
-                <span className="text-xs text-blue-200/80">· Plataforma Central</span>
+                <span className="text-xs text-slate-400 font-medium">· Administración Central</span>
               </div>
-              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1">
+              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1 tracking-tight">
                 {currentUser.name}
               </h1>
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed mt-0.5">
+                Supervisión nacional de producción, inventario en tiempo real en CEDIs, personal logístico y base de datos relacional.
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={onCreateNewRequest}
-              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer border border-blue-500"
             >
-              <PlusCircle className="w-4 h-4" />
-              Nueva Solicitud
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Nueva Solicitud</span>
             </button>
             <button
               type="button"
               onClick={() => setIsAddStaffModalOpen(true)}
-              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl text-xs flex items-center gap-1.5 transition-colors border border-white/20 cursor-pointer shadow-2xs"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700/80 text-slate-200 font-medium rounded-lg text-xs flex items-center gap-1.5 transition-colors border border-slate-700 cursor-pointer shadow-2xs"
               title="Registrar nuevo Conductor o Empacador en la red operativa"
               id="btn-admin-add-staff-top"
             >
-              <UserPlus className="w-4 h-4 text-sky-300" />
-              + Conductor / Empacador
+              <UserPlus className="w-3.5 h-3.5 text-blue-400" />
+              <span>+ Personal Logístico</span>
             </button>
             <button
               type="button"
               onClick={onOpenCalculator}
-              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl text-xs flex items-center gap-1.5 transition-colors border border-white/20 cursor-pointer"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700/80 text-slate-200 font-medium rounded-lg text-xs flex items-center gap-1.5 transition-colors border border-slate-700 cursor-pointer shadow-2xs"
             >
-              <Sliders className="w-4 h-4 text-sky-300" />
-              Calculadora
-            </button>
-            <button
-              type="button"
-              onClick={onOpenAiAssistant}
-              className="px-3 py-2 bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              Asesor IA
+              <Sliders className="w-3.5 h-3.5 text-slate-400" />
+              <span>Calculadora</span>
             </button>
           </div>
         </div>
 
         {/* Selector de Pestañas de Administración */}
-        <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 relative z-10">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 relative z-10">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-slate-800">
             <button
               type="button"
               onClick={() => setAdminTab('ordenes')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 adminTab === 'ordenes'
-                  ? 'bg-white text-blue-950 shadow-xs'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Layers className="w-4 h-4" />
-              <span>Gestión de Órdenes ({requests.length})</span>
+              <Layers className="w-3.5 h-3.5" />
+              <span>Órdenes</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${adminTab === 'ordenes' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {requests.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setAdminTab('inventario')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 adminTab === 'inventario'
-                  ? 'bg-white text-blue-950 shadow-xs'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Boxes className="w-4 h-4" />
-              <span>Inventario CEDIs ({inventoryList.length} SKUs)</span>
+              <Boxes className="w-3.5 h-3.5" />
+              <span>Inventario CEDIs</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${adminTab === 'inventario' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {inventoryList.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setAdminTab('clientes')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 adminTab === 'clientes'
-                  ? 'bg-white text-blue-950 shadow-xs'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Building className="w-4 h-4" />
-              <span>Clientes & Acceso ({clientsList.length})</span>
+              <Building className="w-3.5 h-3.5" />
+              <span>Clientes & Empresas</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${adminTab === 'clientes' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {clientsList.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setAdminTab('operarios')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 adminTab === 'operarios'
-                  ? 'bg-white text-blue-950 shadow-xs'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Truck className="w-4 h-4" />
-              <span>Conductores & Empacadores ({staffList.length})</span>
+              <Truck className="w-3.5 h-3.5" />
+              <span>Personal Operativo</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${adminTab === 'operarios' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {staffList.length}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setAdminTab('supabase')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-2 cursor-pointer ${
                 adminTab === 'supabase'
-                  ? 'bg-white text-blue-950 shadow-xs'
-                  : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <Database className="w-4 h-4" />
-              <span>Base de Datos Supabase (12 Tablas ERD & Conexión)</span>
+              <Database className="w-3.5 h-3.5" />
+              <span>Base de Datos Supabase (12 Tablas)</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2">
             {supabaseConfig.connected ? (
-              <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                Supabase Conectado
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                Supabase Sincronizado
               </span>
             ) : (
-              <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                Supabase Desconectado
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-slate-500" />
+                Modo Local
               </span>
             )}
           </div>
@@ -1742,10 +1949,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setSelectedInvoice(selectedRequest)}
-                    className="w-full btn-primary !bg-slate-900 hover:!bg-slate-800 text-white !py-2 !text-xs flex items-center justify-center gap-1.5 shadow-xs"
+                    style={{ color: '#000000' }}
+                    className="w-full py-2 px-3 text-xs flex items-center justify-center gap-1.5 shadow-md rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-black border-2 border-black cursor-pointer transition-all"
                   >
-                    <Receipt className="w-4 h-4 text-teal-400" />
-                    📄 Descargar Factura Electrónica (PDF)
+                    <Receipt className="w-4 h-4 text-black" style={{ color: '#000000' }} />
+                    <span style={{ color: '#000000' }} className="text-black font-black">
+                      📄 Descargar Factura Electrónica (PDF)
+                    </span>
                   </button>
 
                   <button
@@ -1843,7 +2053,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsSyncingInventory(true);
+                    const res = await syncAllInventoryToSupabase(inventoryList);
+                    setIsSyncingInventory(false);
+                    setToast({
+                      type: res.success ? 'success' : 'error',
+                      text: res.message,
+                    });
+                  }}
+                  disabled={isSyncingInventory}
+                  className="px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-teal-300 bg-teal-50 hover:bg-teal-100 text-teal-900 transition-colors cursor-pointer shadow-2xs"
+                  id="btn-admin-sync-inventory-db"
+                  title="Guardar y registrar todo el inventario (incluyendo Bogotá) en la base de datos PostgreSQL / Supabase"
+                >
+                  <Database className={`w-3.5 h-3.5 text-teal-700 ${isSyncingInventory ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingInventory ? 'Guardando en BD...' : 'Guardar en Base de Datos'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1953,7 +2183,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <th className="p-3">ESPECIFICACIONES / COLORES</th>
                     <th className="p-3">PRECIO & LOTE</th>
                     <th className="p-3 text-center">ESTADO</th>
-                    <th className="p-3 text-right">ACCIONES ADMIN</th>
+                    <th className="p-3 text-right">ACCIONES</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-sans">
@@ -2095,62 +2325,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {getStatusBadge()}
                         </td>
 
-                        {/* ACCIONES ADMIN DIFERENCIADAS */}
+                        {/* ACCIONES ESTILIZADAS: BOTÓN DE ENTRADA DESPLEGABLE + EDITAR + MICROACCIONES */}
                         <td className="p-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {isPaint ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleReplenishStock(item.id, 50)}
-                                  title="Reabastecer con 50 cuñetes de pintura"
-                                  className="px-2 py-1 text-[10px] font-bold bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  +50 Cuñetes
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleReplenishStock(item.id, 20)}
-                                  title="Reabastecer con 20 galones"
-                                  className="px-2 py-1 text-[10px] font-bold bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  +20 Gal
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleReplenishStock(item.id, 50)}
-                                  title="Reabastecer con 50 unidades de este material"
-                                  className="px-2 py-1 text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  +50 Unidades
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleReplenishStock(item.id, 20)}
-                                  title="Reabastecer con 20 unidades"
-                                  className="px-2 py-1 text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  +20 Uds
-                                </button>
-                              </>
-                            )}
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            {/* BOTÓN PRINCIPAL ESTILIZADO: + ENTRADA DE STOCK */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStockEntryProduct(item);
+                                setEntryQty(isPaint ? 50 : 25);
+                                setEntryUnit('cuñetes');
+                                setEntryRemission('');
+                              }}
+                              title={`Registrar entrada o llegada de mercancía a bodega para ${item.productName}`}
+                              className="px-2.5 py-1.5 text-xs font-bold bg-teal-700 hover:bg-teal-800 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-xs hover:shadow cursor-pointer active:scale-95 border border-teal-800"
+                            >
+                              <PlusCircle className="w-3.5 h-3.5 text-amber-300" />
+                              <span>+ Entrada</span>
+                            </button>
 
+                            {/* BOTÓN SECUNDARIO: EDITAR CATÁLOGO & PRODUCTO */}
+                            <button
+                              type="button"
+                              onClick={() => setEditingProduct({ ...item })}
+                              title="Editar especificaciones técnicas, precio, SKU y detalles"
+                              className="px-2 py-1.5 text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg transition-all flex items-center gap-1 shadow-2xs cursor-pointer hover:border-slate-400"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Editar</span>
+                            </button>
+
+                            {/* ACCIÓN RÁPIDA: AGOTAR STOCK */}
                             <button
                               type="button"
                               onClick={() => handleEmptyStock(item.id)}
-                              title="Vaciar stock para probar bloqueo a clientes"
-                              className="px-2 py-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg transition-colors cursor-pointer"
+                              title="Vaciar stock (0) para probar bloqueo comercial a clientes"
+                              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
                             >
-                              Agotar (0)
+                              <Ban className="w-3.5 h-3.5" />
                             </button>
+
+                            {/* ACCIÓN RÁPIDA: ELIMINAR */}
                             <button
                               type="button"
                               onClick={() => handleDeleteProduct(item.id)}
                               title="Eliminar producto del inventario"
-                              className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-red-200"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2375,7 +2595,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     id: cli.id,
                                     name: cli.name || '',
                                     identification: cli.identification || '',
+                                    originalIdentification: cli.identification || '',
                                     email: cli.email || '',
+                                    originalEmail: cli.email || '',
                                     phone: cli.phone || '',
                                     company: cli.company || '',
                                     city: cli.city || 'Medellín',
@@ -4455,10 +4677,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="btn-primary !py-2.5 !px-5 flex items-center gap-2 shadow-sm font-bold bg-blue-700 hover:bg-blue-800 text-white rounded-xl cursor-pointer"
+                  disabled={isSavingClient}
+                  className="btn-primary !py-2.5 !px-5 flex items-center gap-2 shadow-sm font-bold bg-blue-700 hover:bg-blue-800 text-white rounded-xl cursor-pointer disabled:opacity-50"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Guardar Cambios de Cliente</span>
+                  {isSavingClient ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>{isSavingClient ? 'Guardando en Base de Datos...' : 'Guardar Cambios de Cliente'}</span>
                 </button>
               </div>
             </form>
@@ -4801,6 +5028,644 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 >
                   <Check className="w-4 h-4" />
                   <span>Guardar Cambios de Operario</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Desplegable Estilizado de Entrada de Mercancía / Recepción de Stock */}
+      {stockEntryProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full my-6 overflow-hidden animate-scale-in flex flex-col max-h-[92vh]">
+            {/* Header del Modal */}
+            <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-teal-950 p-4 sm:p-5 text-white flex items-center justify-between shrink-0 border-b border-teal-500/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 flex items-center justify-center font-bold shadow-md">
+                  <PlusCircle className="w-5 h-5 text-slate-950" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-bold block">
+                    RECEPCIÓN DE MERCANCÍA · BODEGA CEDI PINTUCO
+                  </span>
+                  <h3 className="text-base font-bold text-white leading-tight">
+                    Registrar Entrada de Stock
+                  </h3>
+                  <span className="text-xs text-teal-200 font-mono">
+                    Sede {stockEntryProduct.warehouseCity} · {stockEntryProduct.warehouseName}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStockEntryProduct(null)}
+                className="text-white/70 hover:text-white text-lg font-bold p-1 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Ficha Resumen del Producto */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center gap-3.5">
+              <div className="w-14 h-14 rounded-xl overflow-hidden bg-white border border-slate-200 shadow-2xs shrink-0">
+                <img
+                  src={getProductImage(stockEntryProduct)}
+                  alt={stockEntryProduct.productName}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-0 space-y-0.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h4 className="font-bold text-slate-900 text-sm truncate">
+                    {stockEntryProduct.productName}
+                  </h4>
+                  {isPaintProduct(stockEntryProduct) ? (
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-teal-100 text-teal-900 border border-teal-200 font-bold">
+                      PINTURA
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 font-bold">
+                      MATERIAL / INSUMO
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 font-mono">
+                  SKU: <strong className="text-slate-800">{stockEntryProduct.sku}</strong> · Lote: {stockEntryProduct.batchCode}
+                </p>
+                <div className="flex items-center gap-2 pt-0.5 text-[11px] font-mono">
+                  <span className="text-slate-600">Stock actual en bodega:</span>
+                  {isPaintProduct(stockEntryProduct) ? (
+                    <span className="font-bold text-amber-900 bg-amber-100/70 px-1.5 py-0.5 rounded">
+                      {stockEntryProduct.cuñetesAvailable || 0} Cuñ · {stockEntryProduct.galonesAvailable || 0} Gal (~{(stockEntryProduct.totalLiters || 0).toLocaleString()} L)
+                    </span>
+                  ) : (
+                    <span className="font-bold text-teal-900 bg-teal-100/70 px-1.5 py-0.5 rounded">
+                      {(stockEntryProduct.unitsAvailable ?? stockEntryProduct.galonesAvailable ?? 0)} {stockEntryProduct.unitMeasure || 'Unidades'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Formulario de Entrada */}
+            <form onSubmit={handleConfirmStockEntry} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Selector de Unidad (Solo si es Pintura) */}
+              {isPaintProduct(stockEntryProduct) && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-800 block">
+                    Presentación que llegó en el cargamento:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEntryUnit('cuñetes')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2.5 ${
+                        entryUnit === 'cuñetes'
+                          ? 'border-teal-700 bg-teal-50 text-teal-950 ring-2 ring-teal-600/30 font-bold'
+                          : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                        entryUnit === 'cuñetes' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        5G
+                      </div>
+                      <div>
+                        <span className="block font-bold">Cuñetes (5 Gal)</span>
+                        <span className="text-[10px] text-slate-500 font-mono">18.9 Litros c/u</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEntryUnit('galones')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2.5 ${
+                        entryUnit === 'galones'
+                          ? 'border-teal-700 bg-teal-50 text-teal-950 ring-2 ring-teal-600/30 font-bold'
+                          : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                        entryUnit === 'galones' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        1G
+                      </div>
+                      <div>
+                        <span className="block font-bold">Galones (1 Gal)</span>
+                        <span className="text-[10px] text-slate-500 font-mono">3.785 Litros c/u</span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Cantidad Adicional a Mano con Stepper y Presets */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800">
+                    Cantidad adicional que ingresa a bodega:
+                  </label>
+                  <span className="text-[11px] font-mono text-slate-500 font-medium">
+                    {isPaintProduct(stockEntryProduct)
+                      ? (entryUnit === 'cuñetes' ? 'Unidades de Cuñete (5 Gal)' : 'Unidades de Galón (1 Gal)')
+                      : (stockEntryProduct.unitMeasure || 'Unidades / Piezas')}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEntryQty((prev) => Math.max(1, (Number(prev) || 0) - 10))}
+                    className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center cursor-pointer border border-slate-300 transition-colors"
+                  >
+                    -
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={entryQty}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setEntryQty(isNaN(val) ? 0 : val);
+                      }}
+                      className="w-full h-11 px-3 text-center text-xl font-bold font-mono bg-slate-50 border-2 border-teal-600 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setEntryQty((prev) => (Number(prev) || 0) + 10)}
+                    className="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center cursor-pointer border border-slate-300 transition-colors"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Chips rápidos de cantidad */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-[10px] font-mono text-slate-400 font-bold">Sumar rápido:</span>
+                  {[5, 10, 20, 50, 100].map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setEntryQty(amt)}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold border transition-colors cursor-pointer ${
+                        entryQty === amt
+                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      +{amt}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setEntryQty((prev) => (Number(prev) || 0) + 50)}
+                    className="px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 transition-colors cursor-pointer"
+                  >
+                    +50 más
+                  </button>
+                </div>
+              </div>
+
+              {/* Cálculo en Vivo y Proyección de Stock */}
+              {(() => {
+                const isPaint = isPaintProduct(stockEntryProduct);
+                const addedNum = Number(entryQty) || 0;
+                let projectedCunetes = stockEntryProduct.cuñetesAvailable || 0;
+                let projectedGalones = stockEntryProduct.galonesAvailable || 0;
+                let projectedUnits = (stockEntryProduct.unitsAvailable ?? stockEntryProduct.galonesAvailable ?? 0);
+                let projectedLiters = 0;
+
+                if (isPaint) {
+                  if (entryUnit === 'cuñetes') {
+                    projectedCunetes += addedNum;
+                  } else {
+                    projectedGalones += addedNum;
+                  }
+                  projectedLiters = Math.round(projectedCunetes * 18.9 + projectedGalones * 3.785);
+                } else {
+                  projectedUnits += addedNum;
+                  projectedLiters = projectedUnits;
+                }
+
+                return (
+                  <div className="p-3.5 bg-teal-50/70 border border-teal-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between text-teal-950 font-mono text-xs">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-teal-700" />
+                        Proyección Resultante en Bodega:
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        Estado: ÓPTIMO
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+                      <div className="p-2.5 bg-white rounded-lg border border-teal-100">
+                        <span className="text-[10px] text-slate-500 block">Stock Anterior:</span>
+                        <p className="font-bold text-slate-800">
+                          {isPaint
+                            ? `${stockEntryProduct.cuñetesAvailable || 0} Cuñ / ${stockEntryProduct.galonesAvailable || 0} Gal`
+                            : `${(stockEntryProduct.unitsAvailable ?? stockEntryProduct.galonesAvailable ?? 0)} ${stockEntryProduct.unitMeasure || 'Uds'}`}
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 bg-white rounded-lg border border-teal-200 shadow-2xs">
+                        <span className="text-[10px] text-teal-700 font-bold block">Nuevo Stock Resultante:</span>
+                        <p className="font-bold text-teal-950">
+                          {isPaint
+                            ? `${projectedCunetes} Cuñ / ${projectedGalones} Gal (~${projectedLiters.toLocaleString()} L)`
+                            : `${projectedUnits} ${stockEntryProduct.unitMeasure || 'Uds'}`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Datos Opcionales de Remisión y Operario */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Nº de Guía / Remisión (Opcional):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. REM-2026-0492"
+                    value={entryRemission}
+                    onChange={(e) => setEntryRemission(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Responsable de Recepción:
+                  </label>
+                  <input
+                    type="text"
+                    value={entryReceiver}
+                    onChange={(e) => setEntryReceiver(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Footer de Acciones del Modal */}
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setStockEntryProduct(null)}
+                  className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold cursor-pointer text-xs transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer text-xs active:scale-95"
+                >
+                  <Check className="w-4 h-4 text-amber-300" />
+                  <span>✓ Confirmar e Ingresar a Inventario</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edición Completa de Producto de Inventario */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full my-6 overflow-hidden animate-scale-in flex flex-col max-h-[90vh]">
+            {/* Header del Modal */}
+            <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 p-4 sm:p-5 text-white flex items-center justify-between shrink-0 border-b border-teal-500/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold shadow-xs">
+                  <Edit3 className="w-5 h-5 text-slate-950" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-bold block">
+                    MODIFICAR CATÁLOGO & STOCK · ADMINISTRADOR PINTUCO
+                  </span>
+                  <h3 className="text-base font-bold text-white leading-tight">
+                    Editar: {editingProduct.productName}
+                  </h3>
+                  <span className="text-xs text-slate-300 font-mono">
+                    SKU: {editingProduct.sku} · Sede CEDI {editingProduct.warehouseCity}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingProduct(null)}
+                className="text-white/70 hover:text-white text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Formulario de Edición */}
+            <form onSubmit={handleSaveEditedProduct} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Nombre Oficial */}
+                <div className="sm:col-span-2">
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Nombre Oficial del Producto:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProduct.productName}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, productName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-1 focus:ring-teal-500 text-xs font-semibold"
+                  />
+                </div>
+
+                {/* SKU */}
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1 font-mono">
+                    Código SKU:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProduct.sku}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, sku: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white font-mono text-xs font-bold"
+                  />
+                </div>
+
+                {/* Categoría */}
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Línea / Categoría:
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.category || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white text-xs"
+                  />
+                </div>
+
+                {/* Ciudad CEDI */}
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Ciudad Principal CEDI:
+                  </label>
+                  <select
+                    value={editingProduct.warehouseCity}
+                    onChange={(e) => {
+                      const newCity = e.target.value;
+                      let defaultBodega = editingProduct.warehouseName;
+                      if (newCity === 'Bogotá D.C.') defaultBodega = 'CEDI Siberia Cundinamarca';
+                      if (newCity === 'Medellín') defaultBodega = 'CEDI Rionegro - Bodega Central';
+                      if (newCity === 'Cali') defaultBodega = 'Hub Regional Suroccidente Acopi Yumbo';
+                      if (newCity === 'Barranquilla') defaultBodega = 'Planta y Logística Caribe Galapa';
+                      if (newCity === 'Bucaramanga') defaultBodega = 'Centro Logístico Oriente Girón';
+                      setEditingProduct({
+                        ...editingProduct,
+                        warehouseCity: newCity,
+                        warehouseName: defaultBodega,
+                      });
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium text-xs"
+                  >
+                    <option value="Bogotá D.C.">Bogotá D.C.</option>
+                    <option value="Medellín">Medellín</option>
+                    <option value="Cali">Cali</option>
+                    <option value="Barranquilla">Barranquilla</option>
+                    <option value="Bucaramanga">Bucaramanga</option>
+                  </select>
+                </div>
+
+                {/* Nombre de Bodega */}
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Nombre Bodega / Planta:
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.warehouseName}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, warehouseName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* SECCIÓN ESPECÍFICA SEGÚN SEA PINTURA O MATERIAL */}
+              <div className="p-3.5 bg-teal-50/60 border border-teal-200 rounded-xl space-y-3">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-teal-900 block">
+                  {isPaintProduct(editingProduct)
+                    ? 'INVENTARIO DE PINTURA (CUÑETES DE 5 GAL & GALONES)'
+                    : 'INVENTARIO DE MATERIAL / HERRAMIENTA / INSUMO (UNIDADES)'}
+                </span>
+
+                {isPaintProduct(editingProduct) ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        Cuñetes (5 Gal):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingProduct.cuñetesAvailable ?? 0}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, cuñetesAvailable: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg font-bold text-amber-900 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        Galones (1 Gal):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingProduct.galonesAvailable ?? 0}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, galonesAvailable: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg font-bold text-teal-900 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        Precio / Galón COP:
+                      </label>
+                      <input
+                        type="number"
+                        min="1000"
+                        step="500"
+                        value={editingProduct.pricePerGalon ?? 110000}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, pricePerGalon: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg font-bold text-slate-900 text-xs"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-3">
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1 font-sans">
+                        Acabado de la Pintura:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Mate Lavable, Satinado Sedoso, Brillante Impermeable..."
+                        value={editingProduct.finish || ''}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, finish: e.target.value })}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        Unidades Disponibles:
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingProduct.unitsAvailable ?? editingProduct.galonesAvailable ?? 0}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                          setEditingProduct({
+                            ...editingProduct,
+                            unitsAvailable: val,
+                            galonesAvailable: val,
+                            totalLiters: val,
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg font-bold text-teal-900 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1 font-sans">
+                        Unidad de Medida:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Unidad, Rollo 50m, Paquete x 10, Cartucho 300ml..."
+                        value={editingProduct.unitMeasure || 'Unidad'}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, unitMeasure: e.target.value })}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-800 block mb-1">
+                        Precio Unitario COP:
+                      </label>
+                      <input
+                        type="number"
+                        min="500"
+                        step="500"
+                        value={editingProduct.unitPrice ?? editingProduct.pricePerGalon ?? 28000}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                          setEditingProduct({
+                            ...editingProduct,
+                            unitPrice: val,
+                            pricePerGalon: val,
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg font-bold text-slate-900 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* SECCIÓN TRAZABILIDAD, LOTES & ESTADO */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1 font-mono">
+                    Lote de Fabricación:
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.batchCode || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, batchCode: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Fecha Vencimiento:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="AAAA-MM-DD"
+                    value={editingProduct.expirationDate || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, expirationDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Estado Operativo:
+                  </label>
+                  <select
+                    value={editingProduct.status}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, status: e.target.value as any })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-xs"
+                  >
+                    <option value="optimo">✓ Óptimo (Disponible)</option>
+                    <option value="critico">⚠️ Stock Bajo / Crítico</option>
+                    <option value="alerta_reposicion">⚡ Alerta de Reposición</option>
+                    <option value="agotado">⛔ Agotado (Bloquear pedidos)</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Descripción Técnica del Producto:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editingProduct.description || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="font-bold text-slate-800 block mb-1">
+                    URL de Imagen del Producto:
+                  </label>
+                  <input
+                    type="url"
+                    value={editingProduct.imageUrl || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, imageUrl: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Botones de Acción */}
+              <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold cursor-pointer text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer text-xs"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>💾 Guardar Cambios en Inventario</span>
                 </button>
               </div>
             </form>

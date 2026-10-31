@@ -7,7 +7,6 @@ import {
   User,
   signOut,
 } from 'firebase/auth';
-
 // Configuración de Firebase leída desde variables de entorno seguras (VITE_)
 // con fallback a los identificadores del proyecto para compatibilidad local
 const firebaseConfig = {
@@ -78,6 +77,18 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 // Obtener el token de acceso en memoria
 export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
+};
+
+// Asegurar token de acceso: si no está en memoria, invocar googleSignIn
+export const ensureGoogleAccessToken = async (): Promise<string | null> => {
+  if (cachedAccessToken) return cachedAccessToken;
+  try {
+    const res = await googleSignIn();
+    return res?.accessToken || null;
+  } catch (err) {
+    console.warn('Autorización de Google no completada:', err);
+    return null;
+  }
 };
 
 // Verificar sincrónicamente si hay token de Google activo

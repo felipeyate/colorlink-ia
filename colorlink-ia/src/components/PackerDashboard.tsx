@@ -543,65 +543,65 @@ export const PackerDashboard: React.FC<PackerDashboardProps> = ({
 
   return (
     <div className="space-y-6" id="packer-dashboard-root">
-      {/* Encabezado del Sistema de Empacador */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white rounded-2xl p-6 shadow-sm border border-blue-800/40 relative overflow-hidden">
-        <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+      {/* Encabezado del Sistema de Empacador · Terminal CEDI */}
+      <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-7 shadow-xs border border-slate-800 relative overflow-hidden">
+        <div className="absolute -right-12 -bottom-12 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-sky-300">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-amber-500/90 text-slate-950 flex items-center justify-center font-bold shadow-xs shrink-0 border border-amber-300/40">
               <Boxes className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10.5px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-400/30 font-bold">
-                  SEDE CEDI {packerCity.toUpperCase()} · ALISTAMIENTO EXCLUSIVO DE TU CIUDAD
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30 font-semibold">
+                  SEDE CEDI {packerCity.toUpperCase()} · TERMINAL DE ALISTAMIENTO
                 </span>
-                <span className="text-xs text-blue-200/80">· Terminal de Empacador en Tiempo Real</span>
+                <span className="text-xs text-slate-400 font-medium">· Verificación en Tiempo Real</span>
               </div>
-              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1">
-                Terminal de Alistamiento & Digitación de Empaque · {packerCity}
+              <h1 className="text-2xl font-bold font-['Space_Grotesk'] text-white mt-1 tracking-tight">
+                Control de Alistamiento & Digitación · CEDI {packerCity}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/10 backdrop-blur-xs px-4 py-2 rounded-xl border border-white/15 text-xs">
+          <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-2 rounded-xl border border-slate-800 text-xs">
             <div className="text-right">
-              <span className="text-sky-300 block text-[10px] uppercase font-mono font-bold">Operario / Sede:</span>
-              <strong className="text-white text-sm">{currentUser.name} ({packerCity})</strong>
+              <span className="text-slate-400 block text-[10px] uppercase font-mono font-medium">Operario en Turno:</span>
+              <strong className="text-white text-sm">{currentUser.name}</strong>
             </div>
-            <div className="w-8 h-8 rounded-full bg-amber-400 text-slate-950 font-bold flex items-center justify-center text-xs">
-              {currentUser.badgeNumber || 'BOD'}
+            <div className="w-8 h-8 rounded-lg bg-amber-400 text-slate-950 font-bold flex items-center justify-center text-xs">
+              {currentUser.badgeNumber || 'CEDI'}
             </div>
           </div>
         </div>
 
-        <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs relative z-10">
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Total Órdenes CEDI {packerCity}:</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-white">{cityRequests.length} envíos</span>
+        <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs relative z-10">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-slate-400 block text-[10px] font-mono uppercase">Total Órdenes {packerCity}:</span>
+            <span className="text-lg font-bold font-mono text-white mt-0.5 block">{cityRequests.length} envíos</span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Pendientes por Empacar:</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-sky-200">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-amber-300 block text-[10px] font-mono uppercase">Por Empacar:</span>
+            <span className="text-lg font-bold font-mono text-amber-200 mt-0.5 block">
               {cityRequests.filter((r) => r.packagingDetails?.status !== 'empacado_listo').length}
             </span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs">
-            <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Empacados & Listos en Muelle:</span>
-            <span className="text-lg font-bold font-['Space_Grotesk'] text-sky-300">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span className="text-emerald-300 block text-[10px] font-mono uppercase">Listos en Muelle:</span>
+            <span className="text-lg font-bold font-mono text-emerald-300 mt-0.5 block">
               {cityRequests.filter((r) => r.packagingDetails?.status === 'empacado_listo').length}
             </span>
           </div>
-          <div className="bg-white/10 p-2.5 rounded-xl border border-white/15 backdrop-blur-xs flex items-center justify-between">
+          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <span className="text-sky-300 block text-[10px] font-mono font-bold uppercase">Herramientas:</span>
-              <span className="font-semibold text-white">Calculadora Técnica</span>
+              <span className="text-slate-400 block text-[10px] font-mono uppercase">Herramientas:</span>
+              <span className="font-semibold text-white">Calculadora m²</span>
             </div>
             <button
               type="button"
               onClick={onOpenCalculator}
-              className="px-3 py-1 bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold rounded-lg text-xs transition-colors cursor-pointer"
+              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg text-xs transition-colors cursor-pointer border border-slate-700"
             >
               Abrir
             </button>

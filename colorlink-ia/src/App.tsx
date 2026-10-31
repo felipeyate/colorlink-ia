@@ -22,8 +22,13 @@ import { QualityCertificateModal } from './components/QualityCertificateModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { SupabaseModal } from './components/SupabaseModal';
 import { PintucoHomePage } from './components/PintucoHomePage';
+import { MainNavbar } from './components/MainNavbar';
+import { CartModal, CartProductItem } from './components/CartModal';
+import { TechnicalSheetsModal } from './components/TechnicalSheetsModal';
+import { AmbientesModal } from './components/AmbientesModal';
 import { EmailToast } from './components/EmailToast';
 import { EmailInboxModal } from './components/EmailInboxModal';
+import { AiFloatingRobot } from './components/AiFloatingRobot';
 import { initAuth } from './googleAuth';
 import {
   sendWelcomeEmail,
@@ -34,7 +39,7 @@ import {
   getEmailsForUser,
   getAllEmails,
 } from './emailService';
-import { syncPaintRequestToSupabase, getSupabaseConfig } from './supabase';
+import { syncPaintRequestToSupabase, syncAllInventoryToSupabase, getSupabaseConfig } from './supabase';
 import { Sparkles, Sliders, Layers, User, LogOut, ShieldCheck, Boxes, Truck, Lock, UserPlus, Receipt, Database, Mail, CheckCircle2, Home, ShoppingBag, Bell } from './icons';
 
 export default function App() {
@@ -79,6 +84,9 @@ export default function App() {
                 }
               }
             }
+            if (!r.chatMessages && r.id === 'req-001') {
+              r.chatMessages = INITIAL_REQUESTS[0].chatMessages;
+            }
             return r;
           });
 
@@ -90,29 +98,49 @@ export default function App() {
   });
 
   // Cargar inventario persistido con imágenes oficiales actualizadas
+  // Cargar inventario persistido con imágenes oficiales actualizadas y productos de Bogotá
   const [inventoryList, setInventoryList] = useState<WarehouseInventoryItem[]>(() => {
     try {
-      const saved = localStorage.getItem('colorlink_pintuco_inventory_v3');
+      const saved = localStorage.getItem('colorlink_pintuco_inventory_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const existingSkus = new Set(parsed.map((p: any) => p.sku || p.id));
+          const missingOfficial = PINTUCO_INVENTORY.filter((p) => !existingSkus.has(p.sku) && !existingSkus.has(p.id));
+          if (missingOfficial.length > 0) {
+            const merged = [...parsed, ...missingOfficial];
+            localStorage.setItem('colorlink_pintuco_inventory_v4', JSON.stringify(merged));
+            localStorage.setItem('colorlink_pintuco_inventory', JSON.stringify(merged));
+            return merged;
+          }
+          return parsed;
+        }
       }
-      // Si existían productos creados manualmente por el admin en la versión previa, combinarlos
-      const oldSaved = localStorage.getItem('colorlink_pintuco_inventory');
+
+      // Si existían productos en v3 o previos, combinarlos con PINTUCO_INVENTORY
+      const oldSaved = localStorage.getItem('colorlink_pintuco_inventory_v3') || localStorage.getItem('colorlink_pintuco_inventory');
       if (oldSaved) {
         const oldParsed = JSON.parse(oldSaved);
         if (Array.isArray(oldParsed)) {
-          const customAdminProducts = oldParsed.filter((item: any) => !PINTUCO_INVENTORY.some(pi => pi.id === item.id));
-          if (customAdminProducts.length > 0) {
-            const combined = [...PINTUCO_INVENTORY, ...customAdminProducts];
-            localStorage.setItem('colorlink_pintuco_inventory_v3', JSON.stringify(combined));
-            return combined;
-          }
+          const customAdminProducts = oldParsed.filter((item: any) => !PINTUCO_INVENTORY.some((pi) => pi.id === item.id || pi.sku === item.sku));
+          const combined = [...PINTUCO_INVENTORY, ...customAdminProducts];
+          localStorage.setItem('colorlink_pintuco_inventory_v4', JSON.stringify(combined));
+          localStorage.setItem('colorlink_pintuco_inventory', JSON.stringify(combined));
+          return combined;
         }
       }
     } catch {}
+    try {
+      localStorage.setItem('colorlink_pintuco_inventory_v4', JSON.stringify(PINTUCO_INVENTORY));
+      localStorage.setItem('colorlink_pintuco_inventory', JSON.stringify(PINTUCO_INVENTORY));
+    } catch {}
     return PINTUCO_INVENTORY;
   });
+
+  // Asegurar persistencia y sincronización con Supabase Cloud al cargar
+  useEffect(() => {
+    syncAllInventoryToSupabase(inventoryList).catch(console.error);
+  }, []);
 
   // Selección pendiente desde la página de inicio o catálogo
   const [pendingRequestData, setPendingRequestData] = useState<PendingRequestData | null>(() => {
@@ -143,6 +171,242 @@ export default function App() {
   const [selectedEmailModalId, setSelectedEmailModalId] = useState<string | undefined>(undefined);
   const [certificateReq, setCertificateReq] = useState<PaintRequest | null>(null);
   const [invoiceReq, setInvoiceReq] = useState<PaintRequest | null>(null);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isTechnicalSheetsOpen, setIsTechnicalSheetsOpen] = useState(false);
+  const [isAmbientesModalOpen, setIsAmbientesModalOpen] = useState(false);
+
+  // Carrito de compras global persistido
+  const [cartItems, setCartItems] = useState<CartProductItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('colorlink_cart_items');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('colorlink_cart_items', JSON.stringify(cartItems));
+    } catch {}
+  }, [cartItems]);
+
+  const handleAddToCart = (
+    item: WarehouseInventoryItem,
+    arg2?: any,
+    arg3?: any,
+    arg4?: any
+  ) => {
+    let qty = 1;
+    let format: 'galon' | 'cuñete' | 'cuarto' | 'unidad' = isPaintProduct(item) ? 'galon' : 'unidad';
+    let colorName: string | undefined;
+    let colorHex: string | undefined;
+
+    if (typeof arg2 === 'number') {
+      qty = arg2 || 1;
+      if (arg3) format = arg3;
+      if (arg4) {
+        colorName = arg4.name;
+        colorHex = arg4.hex;
+      }
+    } else if (typeof arg2 === 'object' && arg2 !== null) {
+      qty = arg2.quantity || 1;
+      format = arg2.presentation || (isPaintProduct(item) ? 'galon' : 'unidad');
+      colorName = arg2.colorName;
+      colorHex = arg2.colorHex;
+    }
+
+    const isPaint = isPaintProduct(item);
+    let unitPrice = item.unitPrice || item.pricePerGalon || (isPaint ? 115000 : 28000);
+    if (isPaint && format === 'cuñete') {
+      unitPrice = Math.round(unitPrice * 5 * 0.92);
+    } else if (isPaint && format === 'cuarto') {
+      unitPrice = Math.round(unitPrice * 0.32);
+    }
+    const totalCostCOP = unitPrice * qty;
+
+    setCartItems((prev) => {
+      const existingIdx = prev.findIndex(
+        (ci) =>
+          (ci.item.sku === item.sku || ci.item.id === item.id) &&
+          ci.format === format &&
+          (ci.selectedColor?.name === colorName || (!ci.selectedColor && !colorName))
+      );
+      if (existingIdx >= 0) {
+        const next = [...prev];
+        const updatedQty = next[existingIdx].quantity + qty;
+        next[existingIdx] = {
+          ...next[existingIdx],
+          quantity: updatedQty,
+          totalCostCOP: next[existingIdx].unitPrice * updatedQty,
+        };
+        return next;
+      }
+      const newItem: CartProductItem = {
+        id: `cart-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        item,
+        quantity: qty,
+        format,
+        selectedColor: colorName ? { name: colorName, hex: colorHex || '#F1F5F9' } : undefined,
+        unitPrice,
+        totalCostCOP,
+      };
+      return [...prev, newItem];
+    });
+    setIsCartOpen(true);
+  };
+
+  const handleUpdateCartQty = (id: string, delta: number) => {
+    setCartItems((prev) =>
+      prev
+        .map((ci) => {
+          if (ci.id === id) {
+            const next = ci.quantity + delta;
+            if (next <= 0) return null;
+            return {
+              ...ci,
+              quantity: next,
+              totalCostCOP: next * ci.unitPrice,
+            };
+          }
+          return ci;
+        })
+        .filter(Boolean) as CartProductItem[]
+    );
+  };
+
+  const handleRemoveFromCart = (id: string) => {
+    setCartItems((prev) => prev.filter((ci) => ci.id !== id));
+  };
+
+  const handleClearCart = () => {
+    setCartItems([]);
+  };
+
+  const handleCheckoutCart = () => {
+    if (cartItems.length === 0) return;
+
+    if (!currentUser) {
+      setIsCartOpen(false);
+      setView('register');
+      return;
+    }
+
+    const codeNumber = Math.floor(1000 + Math.random() * 9000);
+    const hasPaint = cartItems.some((ci) => isPaintProduct(ci.item));
+    const firstPaint = cartItems.find((ci) => isPaintProduct(ci.item));
+    const mainItem = firstPaint || cartItems[0];
+
+    const totalCuñetes = cartItems.reduce((acc, ci) => (ci.format === 'cuñete' ? acc + ci.quantity : acc), 0);
+    const totalGalons = cartItems.reduce(
+      (acc, ci) => (ci.format === 'galon' ? acc + ci.quantity : ci.format === 'cuñete' ? acc + ci.quantity * 5 : acc),
+      0
+    );
+    const totalCostCOP = cartItems.reduce((acc, ci) => acc + ci.totalCostCOP, 0);
+
+    const orderItems: OrderItem[] = cartItems.map((ci, idx) => ({
+      id: `item-${Date.now()}-${idx}`,
+      sku: ci.item.sku,
+      productName: ci.item.productName,
+      category: ci.item.category,
+      itemType: isPaintProduct(ci.item) ? 'pintura' : 'material',
+      colorName: ci.selectedColor?.name || (isPaintProduct(ci.item) ? 'Blanco Lirio Silvestre 01' : undefined),
+      colorHex: ci.selectedColor?.hex || (isPaintProduct(ci.item) ? '#F1F5F9' : undefined),
+      presentation: ci.format,
+      quantity: ci.quantity,
+      unitPrice: ci.unitPrice,
+      totalCostCOP: ci.totalCostCOP,
+      warehouseCity: ci.item.warehouseCity,
+      warehouseName: ci.item.warehouseName,
+      notes: ci.format === 'cuñete' ? 'Cuñete de 5 Galones' : ci.format === 'galon' ? 'Galón individual' : 'Unidad de producto',
+    }));
+
+    const summaryNotes = `[Pedido Multi-Ítem Carrito: ${cartItems.length} productos | ${cartItems
+      .map((c) => `${c.quantity}x ${c.item.productName} (${c.format}${c.selectedColor ? ` - ${c.selectedColor.name}` : ''})`)
+      .join(', ')}]`.trim();
+
+    const newReq: PaintRequest = {
+      id: 'req-' + Date.now(),
+      requestCode: `PTC-2026-${codeNumber}`,
+      createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      clientName: currentUser.name,
+      clientEmail: currentUser.email,
+      clientPhone: currentUser.phone,
+      city: mainItem.item.warehouseCity || currentUser.city || 'Medellín',
+      deliveryAddress: currentUser.address || `${currentUser.city || 'Medellín'}, Colombia`,
+      projectType: 'Residencial',
+      surfaceType: 'mamposteria_interior',
+      environment: 'interior',
+      areaM2: totalGalons > 0 ? totalGalons * 35 : cartItems.length * 10,
+      colorName: firstPaint?.selectedColor?.name || (hasPaint ? 'Blanco Lirio Silvestre 01' : 'N/A (Material / Herramienta)'),
+      colorHex: firstPaint?.selectedColor?.hex || (hasPaint ? '#F1F5F9' : undefined),
+      orderItemType: hasPaint ? 'pintura' : 'material',
+      catalogSku: mainItem.item.sku,
+      catalogProductName: mainItem.item.productName,
+      catalogUnitPrice: mainItem.unitPrice,
+      items: orderItems,
+      notes: summaryNotes,
+      requiresApplicationService: false,
+      status: 'solucion_tecnica',
+      technicalCalculation: {
+        areaM2: totalGalons > 0 ? totalGalons * 35 : 10,
+        recommendedProduct: {
+          id: mainItem.item.productId || mainItem.item.sku,
+          name: mainItem.item.productName,
+          line: 'Hogar y Construcción',
+          category: mainItem.item.category,
+          description: `Despachado desde ${mainItem.item.warehouseName}`,
+          coveragePerGalM2: 35,
+          recommendedHands: 2,
+          dilution: '10% agua potable',
+          dryingTouchHours: 1,
+          dryingTotalHours: 4,
+          warrantyYears: 5,
+          finishType: (mainItem.item.finish as any) || 'Mate',
+          ecoFriendly: true,
+          vocGramsLiter: 15,
+          pricePerGalon: mainItem.unitPrice,
+          availableSizes: ['1 Galón', 'Cuñete (5 Gal)'],
+        },
+        handsNeeded: 2,
+        totalGalons: totalGalons || 1,
+        totalCuñetes: totalCuñetes,
+        remainderGalons: cartItems.filter((c) => c.format === 'galon').reduce((acc, c) => acc + c.quantity, 0),
+        primerGalons: 1,
+        requiredSupplies: [],
+        estimatedMaterialCostCOP: totalCostCOP,
+        preparationAdvice: ['Limpieza mecánica de polvo y grasa'],
+        applicationInstructions: ['Aplicar a dos manos con brocha o rodillo'],
+        warrantyDurationYears: 5,
+      },
+      packagingDetails: {
+        packerName: 'Operario CEDI Rionegro',
+        batchCode: `LOT-PTC-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+        checkedSupplies: ['Sellos de seguridad Pintuco'],
+        cuñetesPacked: totalCuñetes,
+        galonesPacked: cartItems.filter((c) => c.format === 'galon').reduce((acc, c) => acc + c.quantity, 0),
+        weightKg: Math.max(10, Math.round(totalGalons * 5 + cartItems.length * 2)),
+        qualitySealAttached: true,
+        qrInspectionCode: `QR-PTC-2026-${codeNumber}`,
+        status: 'empacado_listo',
+        notes: `Pedido multi-ítem con ${cartItems.length} referencias de inventario.`,
+      },
+      deliveryDetails: {
+        driverName: 'Carlos Mario Jaramillo',
+        driverPhone: '+57 312 849 2011',
+        vehiclePlate: 'WOK-842',
+        vehicleType: 'Turbo Pintuco 4.5T',
+        routeStatus: 'en_ruta',
+        currentLocation: `CEDI ${mainItem.item.warehouseCity || 'Rionegro'}`,
+        deliveryAddress: currentUser.address || `${currentUser.city || 'Medellín'}, Colombia`,
+        departedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    };
+
+    handleSubmitRequest(newReq);
+    setCartItems([]);
+    setIsCartOpen(false);
+    setView('request');
+  };
 
   // Estadísticas del Buzón de Correos en Vivo (Exclusivo para el cliente registrado)
   const [emailStats, setEmailStats] = useState(() => ({
@@ -177,6 +441,32 @@ export default function App() {
       window.removeEventListener('colorlink-email-sent', refreshEmailCount);
       window.removeEventListener('colorlink-email-read', refreshEmailCount);
       window.removeEventListener('colorlink-email-deleted', refreshEmailCount);
+    };
+  }, [currentUser]);
+
+  // Sincronizar automáticamente si el cliente en sesión fue editado por el administrador
+  React.useEffect(() => {
+    const handleClientUpdated = (e: any) => {
+      const updatedClient = e.detail;
+      if (
+        currentUser &&
+        updatedClient &&
+        (currentUser.id === updatedClient.id || currentUser.email.toLowerCase() === updatedClient.email?.toLowerCase())
+      ) {
+        setCurrentUser((prev) => (prev ? {
+          ...prev,
+          name: updatedClient.name || prev.name,
+          email: updatedClient.email || prev.email,
+          phone: updatedClient.phone || prev.phone,
+          company: updatedClient.company || prev.company,
+          city: updatedClient.city || prev.city,
+          address: updatedClient.address || prev.address,
+        } : prev));
+      }
+    };
+    window.addEventListener('colorlink-client-updated', handleClientUpdated);
+    return () => {
+      window.removeEventListener('colorlink-client-updated', handleClientUpdated);
     };
   }, [currentUser]);
 
@@ -215,15 +505,16 @@ export default function App() {
     }
   };
 
-  // Guardar en localStorage cuando cambia el inventario
+  // Guardar en base de datos local y Supabase Cloud cuando cambia el inventario
   const handleUpdateInventory = (updatedInv: WarehouseInventoryItem[]) => {
     setInventoryList(updatedInv);
     try {
-      localStorage.setItem('colorlink_pintuco_inventory_v3', JSON.stringify(updatedInv));
+      localStorage.setItem('colorlink_pintuco_inventory_v4', JSON.stringify(updatedInv));
       localStorage.setItem('colorlink_pintuco_inventory', JSON.stringify(updatedInv));
     } catch (err) {
       console.warn('Error al guardar inventario:', err);
     }
+    syncAllInventoryToSupabase(updatedInv).catch(console.error);
   };
 
   // Determinar paso activo para el panel izquierdo (BrandPanel)
@@ -592,7 +883,39 @@ export default function App() {
 
   const handleApplyCalculationToRequest = (surface: SurfaceType, areaM2: number) => {
     setIsCalculatorOpen(false);
-    updatePendingRequestData({ surfaceType: surface, areaM2 });
+
+    const surfaceLabels: Record<SurfaceType, string> = {
+      mamposteria_interior: 'Pared Interior',
+      fachada_exterior: 'Fachada Exterior',
+      metal_ferroso: 'Metales / Rejas',
+      concreto_piso: 'Pisos / Bodegas',
+      madera: 'Maderas / Decks',
+      humedad_salitre: 'Humedad Severa',
+      drywall_yeso: 'Drywall / Yeso',
+    };
+
+    // Buscar ítem en inventario CEDI que coincida con la superficie y la ciudad
+    const matchingItem = inventoryList.find((item) => {
+      const isPaint = isPaintProduct(item);
+      if (!isPaint) return false;
+      const cat = item.category.toLowerCase();
+      const pName = item.productName.toLowerCase();
+      if (surface === 'fachada_exterior') return cat.includes('fachada') || cat.includes('exterior') || pName.includes('koraza');
+      if (surface === 'concreto_piso') return cat.includes('piso') || cat.includes('industrial') || pName.includes('epox');
+      if (surface === 'metal_ferroso') return cat.includes('metal') || pName.includes('pintulux');
+      if (surface === 'madera') return cat.includes('madera') || pName.includes('mader');
+      if (surface === 'humedad_salitre') return cat.includes('humedad') || pName.includes('sellomax');
+      return cat.includes('interior') || cat.includes('muros') || pName.includes('viniltex');
+    });
+
+    updatePendingRequestData({
+      surfaceType: surface,
+      areaM2: areaM2 || 80,
+      productName: matchingItem?.productName || 'Pintura Pintuco Especializada',
+      catalogItem: matchingItem || undefined,
+      notes: `Cálculo generado desde Calculadora Técnica Pintuco: Área de ${areaM2} m² para ${surfaceLabels[surface] || 'superficie'}.`,
+    });
+
     if (currentUser) {
       setView('request');
     } else {
@@ -623,6 +946,19 @@ export default function App() {
 
   const roleBadge = getRoleBadge(currentUser?.role);
 
+  const handleNavigateAmbientes = () => {
+    setIsAmbientesModalOpen(false);
+    if (view !== 'home') {
+      setView('home');
+    }
+    setTimeout(() => {
+      const el = document.getElementById('ambientes');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 120);
+  };
+
   return (
     <div className="app-root" id="colorlink-root-app">
       {/* Si la vista es 'home', renderizamos la página oficial estilo Pintuco */}
@@ -631,6 +967,11 @@ export default function App() {
           currentUser={currentUser}
           requests={requests}
           inventory={inventoryList}
+          cartCount={cartItems.length}
+          onOpenCart={() => setIsCartOpen(true)}
+          onOpenTechnicalSheets={() => setIsTechnicalSheetsOpen(true)}
+          onNavigateAmbientes={handleNavigateAmbientes}
+          emailUnreadCount={emailStats.unread}
           onNavigateToLogin={() => setView('login')}
           onNavigateToRegister={() => setView('register')}
           onNavigateToPortal={() => {
@@ -684,18 +1025,7 @@ export default function App() {
             }
           }}
           onSelectCatalogItemAndBuy={(item, options) => {
-            updatePendingRequestData({
-              catalogItem: item,
-              orderItemType: item.unitType === 'herramienta' || item.unitType === 'insumo' ? 'material' : 'pintura',
-              colorName: options?.colorName,
-              colorHex: options?.colorHex,
-              materialQuantity: options?.quantity || 1,
-            });
-            if (currentUser) {
-              setView('request');
-            } else {
-              setView('register');
-            }
+            handleAddToCart(item, options);
           }}
           onSelectSpaceAndQuote={(space) => {
             const matchingItem = inventoryList.find((item) =>
@@ -726,235 +1056,28 @@ export default function App() {
         />
       ) : (
         <>
-          {/* Barra de navegación superior ColorLink · Paleta Armoniosa Blancos y Azules */}
-          <header className="navbar-root shadow-xs sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-blue-100">
-            {/* Franja superior Azul Real & Celeste Vibrante */}
-            <div className="h-[2.5px] w-full bg-gradient-to-r from-blue-700 via-sky-500 to-indigo-600" />
-
-            <div className="navbar-container !max-w-full !px-3 sm:!px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
-              <div className="flex items-center gap-2 sm:gap-3">
-                {/* Logo ColorLink Oficial con Emblema CL */}
-                <button
-                  type="button"
-                  className="flex items-center gap-2 sm:gap-2.5 cursor-pointer group text-left transition-transform hover:scale-[1.01]"
-                  onClick={() => setView('home')}
-                  id="btn-nav-brand-logo"
-                  title="ColorLink · Inicio"
-                >
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/40 shadow-xs flex items-center justify-center font-bold text-white text-sm font-['Space_Grotesk'] tracking-wide group-hover:rotate-[-3deg] transition-transform shrink-0">
-                    CL
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-1.5 leading-none">
-                      <span className="font-bold text-lg text-slate-900 tracking-tight font-['Space_Grotesk']">ColorLink</span>
-                    </div>
-                    <span className="text-[9px] font-mono tracking-wider uppercase text-blue-600/80 font-semibold mt-0.5 hidden xs:inline">
-                      Gestión Inteligente de Recubrimientos
-                    </span>
-                  </div>
-                </button>
-
-                <div className="h-5 w-px bg-slate-200 hidden sm:block" />
-
-                {/* Botón Catálogo / Inicio */}
-                <button
-                  type="button"
-                  onClick={() => setView('home')}
-                  className="px-3 py-1.5 rounded-full bg-white hover:bg-blue-50/80 text-slate-700 hover:text-blue-700 font-semibold text-xs border border-slate-200 hover:border-blue-300 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
-                  title="Volver al Catálogo y Vista Principal"
-                  id="btn-nav-goto-pintuco-home"
-                >
-                  <Home className="w-3.5 h-3.5 text-blue-600" />
-                  <span className="hidden sm:inline">Catálogo & Inicio</span>
-                </button>
-
-                {/* Menú de acceso cuando está autenticado */}
-                {currentUser && (
-                  <div className="flex items-center gap-1.5 pl-1 sm:pl-2 border-l border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => setView('request')}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        view === 'request' || view === 'success'
-                          ? 'bg-blue-600 text-white font-bold shadow-xs border border-blue-700'
-                          : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50'
-                      }`}
-                    >
-                      {roleBadge.icon}
-                      <span className="hidden sm:inline">
-                        {currentUser.role === 'cliente'
-                          ? 'Mi Portal Cliente'
-                          : currentUser.role === 'empacador'
-                          ? 'Centro de Empaque'
-                          : currentUser.role === 'conductor'
-                          ? 'Rutas y Envíos'
-                          : 'Panel Admin'}
-                      </span>
-                      <span className="sm:hidden">Portal</span>
-                    </button>
-
-                    {/* SOLO visible para ADMINISTRADOR: El cliente, empacador y conductores NO ven Ecosistema 360° en su barra */}
-                    {currentUser.role === 'administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setView('transversal-ecosystem')}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                          view === 'transversal-ecosystem'
-                            ? 'bg-blue-950 text-white font-bold shadow-xs'
-                            : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50'
-                        }`}
-                        title="Ecosistema Transversal 360° (Exclusivo Administrador)"
-                        id="btn-nav-ecosistema-admin"
-                      >
-                        <Layers className="w-3.5 h-3.5 text-sky-400" />
-                        <span>Ecosistema 360°</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Lado Derecho: Acciones Amigables con el Cliente */}
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                {/* Notificaciones y Despachos: SOLO para el cliente que esté registrado (o admin) */}
-                {currentUser && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedEmailModalId(undefined);
-                      setIsEmailInboxOpen(true);
-                    }}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
-                      emailStats.unread > 0
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white font-bold border border-blue-700 animate-pulse'
-                        : 'bg-white hover:bg-blue-50/80 text-slate-700 hover:text-blue-700 border border-slate-200'
-                    }`}
-                    title={
-                      currentUser.role === 'cliente'
-                        ? `Tus notificaciones personales (${currentUser.email})`
-                        : 'Buzón de notificaciones del sistema'
-                    }
-                    id="btn-header-email-inbox"
-                  >
-                    <Bell className={`w-3.5 h-3.5 ${emailStats.unread > 0 ? 'text-white' : 'text-blue-600'}`} />
-                    <span className="hidden md:inline">
-                      {currentUser.role === 'cliente' ? 'Mis Notificaciones' : 'Notificaciones'}
-                    </span>
-                    {emailStats.unread > 0 ? (
-                      <span className="px-1.5 py-0.2 rounded-full bg-white text-blue-700 font-bold font-mono text-[10px]">
-                        {emailStats.unread}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        ({emailStats.total})
-                      </span>
-                    )}
-                  </button>
-                )}
-
-                {/* Acceso a Supabase Cloud: visible solo para Administrador */}
-                {currentUser?.role === 'administrador' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsSupabaseModalOpen(true)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
-                      supabaseConnected
-                        ? 'bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300'
-                        : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300'
-                    }`}
-                    title="Configurar y sincronizar Base de Datos Supabase (PostgreSQL)"
-                    id="btn-header-supabase-db"
-                  >
-                    <Database className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="hidden xl:inline">Supabase DB</span>
-                    {supabaseConnected ? (
-                      <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                    ) : (
-                      <span className="w-2 h-2 rounded-full bg-sky-400" />
-                    )}
-                  </button>
-                )}
-
-                {/* Calculadora de Pintura */}
-                <button
-                  type="button"
-                  onClick={() => setIsCalculatorOpen(true)}
-                  className="px-3 py-1.5 bg-white hover:bg-blue-50/80 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
-                  title="Calcular metros cuadrados y galones para tus muros"
-                  id="btn-nav-calculator"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-blue-600" />
-                  <span className="hidden lg:inline">Calculadora m²</span>
-                </button>
-
-                {/* Asesor IA ColorLink */}
-                <button
-                  type="button"
-                  onClick={() => setIsAiModalOpen(true)}
-                  className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-sky-600 hover:from-blue-700 hover:to-sky-700 text-white font-bold rounded-full text-xs flex items-center gap-1.5 transition-all shadow-xs border border-blue-500 cursor-pointer"
-                  title="Consultar recomendaciones con el Asesor Técnico Inteligente"
-                  id="btn-nav-ai-assistant"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-white" />
-                  <span className="hidden sm:inline">Asesor IA</span>
-                </button>
-
-                {/* Perfil de Usuario o Botones de Login */}
-                {currentUser ? (
-                  <div className="flex items-center gap-1.5 sm:gap-2 ml-1 pl-1.5 sm:pl-2 border-l border-slate-200">
-                    <div className="flex items-center gap-2 bg-blue-50/70 border border-blue-200/80 rounded-full pl-1.5 pr-2.5 py-1">
-                      <div className="w-7 h-7 rounded-full bg-blue-700 text-white font-bold text-xs flex items-center justify-center ring-2 ring-blue-300 shadow-2xs shrink-0">
-                        {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
-                      </div>
-                      <div className="hidden sm:flex flex-col text-left leading-tight">
-                        <span className="text-xs font-bold text-blue-950 truncate max-w-[110px]" title={currentUser.name}>
-                          {currentUser.name.split(' ')[0]}
-                        </span>
-                        <span className="text-[9.5px] font-semibold text-blue-600">
-                          {currentUser.role === 'cliente'
-                            ? 'Cliente ColorLink'
-                            : currentUser.role === 'empacador'
-                            ? 'Empacador CEDI'
-                            : currentUser.role === 'conductor'
-                            ? 'Conductor Logístico'
-                            : 'Administrador'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className="w-8 h-8 rounded-full bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors flex items-center justify-center cursor-pointer border border-slate-200"
-                      title="Cerrar sesión"
-                      id="btn-nav-logout"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setView('login')}
-                      className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition-all cursor-pointer"
-                    >
-                      <User className="w-3.5 h-3.5 inline mr-1 text-slate-500" />
-                      <span>Iniciar Sesión</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setView('register')}
-                      className="px-4 py-1.5 rounded-full text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-xs transition-all cursor-pointer"
-                    >
-                      <UserPlus className="w-3.5 h-3.5 inline mr-1 text-white" />
-                      <span>Cotizar Proyecto</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </header>
+          {/* Barra de navegación superior ColorLink · Idéntica a la imagen */}
+          <MainNavbar
+            currentUser={currentUser}
+            cartCount={cartItems.length}
+            activeSection={view}
+            onNavigateHome={() => setView('home')}
+            onNavigateCatalog={() => setView('home')}
+            onOpenCalculator={() => setIsCalculatorOpen(true)}
+            onNavigatePalettes={() => setView('home')}
+            onOpenTechnicalSheets={() => setIsTechnicalSheetsOpen(true)}
+            onNavigateAmbientes={handleNavigateAmbientes}
+            onOpenCart={() => setIsCartOpen(true)}
+            onNavigateLogin={() => setView('login')}
+            onNavigatePortal={() => setView('request')}
+            onLogout={handleLogout}
+            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+            onOpenEmailInbox={() => {
+              setSelectedEmailModalId(undefined);
+              setIsEmailInboxOpen(true);
+            }}
+            emailUnreadCount={emailStats.unread}
+          />
 
           {/* Renderizado de la Vista Principal */}
           {currentUser && view === 'transversal-ecosystem' ? (
@@ -1083,6 +1206,12 @@ export default function App() {
                   onOpenCertificate={(req) => setCertificateReq(req)}
                   onLogout={handleLogout}
                   onViewTransversal={() => setView('transversal-ecosystem')}
+                  cartItems={cartItems}
+                  onAddToCart={handleAddToCart}
+                  onUpdateCartQty={handleUpdateCartQty}
+                  onRemoveFromCart={handleRemoveFromCart}
+                  onClearCart={handleClearCart}
+                  onOpenCart={() => setIsCartOpen(true)}
                 />
               )}
             </main>
@@ -1094,6 +1223,38 @@ export default function App() {
       {isAiModalOpen && (
         <AiAssistantModal
           onClose={() => setIsAiModalOpen(false)}
+          currentUser={currentUser}
+          city={currentUser?.city}
+          inventoryList={inventoryList}
+          onSelectRecommendation={(surface, product, areaM2) => {
+            setIsAiModalOpen(false);
+            updatePendingRequestData({
+              surfaceType: surface as any,
+              productName: product,
+              areaM2: areaM2 || 60,
+            });
+            if (currentUser) {
+              setView('request');
+            } else {
+              setView('register');
+            }
+          }}
+          onNavigate={(target) => {
+            setIsAiModalOpen(false);
+            if (target === 'orders') {
+              if (currentUser) setView('transversal-ecosystem');
+              else setView('login');
+            } else if (target === 'calculator') {
+              setIsCalculatorOpen(true);
+            } else if (target === 'register') {
+              setView('register');
+            } else if (target === 'login') {
+              setView('login');
+            } else if (target === 'new_request') {
+              if (currentUser) setView('request');
+              else setView('register');
+            }
+          }}
         />
       )}
 
@@ -1157,6 +1318,77 @@ export default function App() {
           initialSelectedEmailId={selectedEmailModalId}
         />
       )}
+
+      {/* Modal de Carrito de Compras Oficial ColorLink */}
+      <CartModal
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        cartItems={cartItems}
+        onUpdateQty={handleUpdateCartQty}
+        onRemoveItem={handleRemoveFromCart}
+        onClearCart={handleClearCart}
+        onCheckout={handleCheckoutCart}
+        onExploreCatalog={() => {
+          setIsCartOpen(false);
+          setView('home');
+          setTimeout(() => {
+            const el = document.getElementById('catalog-pintuco-section');
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 150);
+        }}
+      />
+
+      {/* Modal de Fichas Técnicas Oficiales Pintuco */}
+      <TechnicalSheetsModal
+        isOpen={isTechnicalSheetsOpen}
+        onClose={() => setIsTechnicalSheetsOpen(false)}
+        onOpenCalculator={() => {
+          setIsTechnicalSheetsOpen(false);
+          setIsCalculatorOpen(true);
+        }}
+        onSelectProductForQuote={(productName) => {
+          setIsTechnicalSheetsOpen(false);
+          if (currentUser) {
+            setView('request');
+          } else {
+            setView('register');
+          }
+        }}
+      />
+
+      {/* Modal de Ambientes Arquitectónicos ColorLink */}
+      <AmbientesModal
+        isOpen={isAmbientesModalOpen}
+        onClose={() => setIsAmbientesModalOpen(false)}
+        onSelectRoomAndQuote={(surface, productName, colorTag) => {
+          setIsAmbientesModalOpen(false);
+          updatePendingRequestData({
+            surfaceType: surface,
+            productName,
+            colorName: colorTag.split('&')[0].trim(),
+          });
+          if (currentUser) {
+            setView('request');
+          } else {
+            setView('register');
+          }
+        }}
+        onNavigateHomeAmbientes={() => {
+          setIsAmbientesModalOpen(false);
+          setView('home');
+          setTimeout(() => {
+            const el = document.getElementById('ambientes');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }, 100);
+        }}
+      />
+
+      {/* Robot Asistente Virtual Flotante Oficial ColorLink - Presente en todas las páginas */}
+      <AiFloatingRobot
+        onOpenAdvisor={() => setIsAiModalOpen(true)}
+      />
     </div>
   );
 };

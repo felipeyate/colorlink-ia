@@ -12,7 +12,6 @@ import {
   Package,
   Clock,
   Droplet,
-  LogOut,
   Building,
   Boxes,
   AlertTriangle,
@@ -24,6 +23,7 @@ import {
   Plus,
   Minus,
   Trash2,
+  Sliders,
 } from '../icons';
 
 interface RequestViewProps {
@@ -31,11 +31,20 @@ interface RequestViewProps {
   inventoryList?: WarehouseInventoryItem[];
   selectedCatalogItem?: WarehouseInventoryItem | null;
   initialPendingData?: PendingRequestData | null;
+  onClearInitialPendingData?: () => void;
   onClearSelectedCatalogItem?: () => void;
   onSubmitRequest: (request: PaintRequest) => void;
   onOpenAiAssistant: () => void;
   onLogout: () => void;
   onViewTransversal: () => void;
+  onAddToCart?: (
+    item: WarehouseInventoryItem,
+    quantity: number,
+    format: 'galon' | 'cuñete' | 'cuarto' | 'unidad',
+    color?: { name: string; hex: string }
+  ) => void;
+  onOpenCart?: () => void;
+  onNavigateCatalog?: () => void;
 }
 
 export const RequestView: React.FC<RequestViewProps> = ({
@@ -43,11 +52,15 @@ export const RequestView: React.FC<RequestViewProps> = ({
   inventoryList = [],
   selectedCatalogItem,
   initialPendingData,
+  onClearInitialPendingData,
   onClearSelectedCatalogItem,
   onSubmitRequest,
   onOpenAiAssistant,
   onLogout,
   onViewTransversal,
+  onAddToCart,
+  onOpenCart,
+  onNavigateCatalog,
 }) => {
   // Determinar si el producto seleccionado es Pintura o Material / Herramienta
   const isPaint = useMemo(() => {
@@ -106,6 +119,7 @@ export const RequestView: React.FC<RequestViewProps> = ({
   const [requiresApplicationService, setRequiresApplicationService] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stockError, setStockError] = useState('');
+  const [addedToCartNotification, setAddedToCartNotification] = useState<string | null>(null);
 
   // Ítems adicionales en el mismo pedido
   const [extraItems, setExtraItems] = useState<OrderItem[]>([]);
@@ -186,6 +200,41 @@ export const RequestView: React.FC<RequestViewProps> = ({
       }
     }
   }, [selectedCatalogItem]);
+
+  // Sincronizar automáticamente cuando el cliente aplica un cálculo desde la Calculadora Técnica o un Espacio
+  useEffect(() => {
+    if (initialPendingData) {
+      if (initialPendingData.surfaceType) {
+        setSurfaceType(initialPendingData.surfaceType);
+        if (initialPendingData.surfaceType === 'fachada_exterior') setEnvironment('exterior');
+        else if (initialPendingData.surfaceType === 'concreto_piso') setEnvironment('industrial');
+        else if (initialPendingData.surfaceType === 'humedad_salitre') setEnvironment('alta_humedad');
+        else setEnvironment('interior');
+      }
+      if (initialPendingData.areaM2) {
+        setAreaM2(initialPendingData.areaM2);
+      }
+      if (initialPendingData.colorName) {
+        setColorName(initialPendingData.colorName);
+      }
+      if (initialPendingData.colorHex) {
+        setCustomColorHex(initialPendingData.colorHex);
+      }
+      if (initialPendingData.finish) {
+        const f = initialPendingData.finish.toLowerCase();
+        if (f.includes('satin')) setFinishType('Satinado');
+        else if (f.includes('brillant')) setFinishType('Brillante');
+        else if (f.includes('semi')) setFinishType('Semibrillante');
+        else setFinishType('Mate');
+      }
+      if (initialPendingData.notes) {
+        setNotes(initialPendingData.notes);
+      }
+      if (initialPendingData.materialQuantity) {
+        setMaterialQuantity(initialPendingData.materialQuantity);
+      }
+    }
+  }, [initialPendingData]);
 
   // Cálculo técnico para pinturas
   const calculation = useMemo(() => {
@@ -416,6 +465,134 @@ export const RequestView: React.FC<RequestViewProps> = ({
     }, 700);
   };
 
+  const handleAddToCartAndContinue = () => {
+    if (!currentStockStatus.isAvailable) {
+      setStockError('No es posible agregar al carrito: El producto seleccionado se encuentra agotado o sin existencias en bodega CEDI.');
+      return;
+    }
+
+    if (!isPaint && selectedCatalogItem) {
+      const unitsAvail = selectedCatalogItem.unitsAvailable ?? selectedCatalogItem.galonesAvailable ?? selectedCatalogItem.totalLiters ?? 0;
+      if (materialQuantity > unitsAvail) {
+        setStockError(`La cantidad solicitada (${materialQuantity} unidades) supera las existencias disponibles en bodega (${unitsAvail} unidades).`);
+        return;
+      }
+    }
+
+    setStockError('');
+
+    // Resolver ítem objetivo en inventario
+    let targetItem: WarehouseInventoryItem = selectedCatalogItem || currentStockStatus.item!;
+    if (!targetItem) {
+      const matched = inventoryList.find((i) =>
+        i.productName.toLowerCase().includes(calculation.recommendedProduct.name.toLowerCase()) ||
+        (i.productId && i.productId === calculation.recommendedProduct.id)
+      );
+      if (matched) {
+        targetItem = matched;
+      } else {
+        targetItem = {
+          id: `inv-${calculation.recommendedProduct.id || 'calc'}-${Date.now()}`,
+          sku: calculation.recommendedProduct.id || 'PTC-CALC-01',
+          productId: calculation.recommendedProduct.id,
+          productName: calculation.recommendedProduct.name,
+          category: calculation.recommendedProduct.category || 'Arquitectónica',
+          warehouseCity: city,
+          warehouseName: nearestWarehouse.name,
+          cuñetesAvailable: 100,
+          galonesAvailable: 500,
+          quartsAvailable: 100,
+          totalLiters: 5000,
+          minStockAlert: 50,
+          batchCode: 'LOTE-CALC-2026',
+          expirationDate: '2028-12-31',
+          status: 'optimo',
+          lastUpdated: new Date().toISOString(),
+          pricePerGalon: calculation.recommendedProduct.pricePerGalon,
+          unitPrice: calculation.recommendedProduct.pricePerGalon,
+          unitType: isPaint ? ('pintura' as const) : ('herramienta' as const),
+          finish: finishType,
+          description: calculation.recommendedProduct.description,
+          imageUrl: getProductImage({ productName: calculation.recommendedProduct.name, category: calculation.recommendedProduct.category }),
+        };
+      }
+    }
+
+    const finalColor = isPaint
+      ? (isCustomColorActive ? `Personalizado (${customColorHex})` : colorName)
+      : 'N/A';
+    const finalHex = isPaint
+      ? (isCustomColorActive ? customColorHex : colorPresets.find((c) => c.name === colorName)?.hex || '#86DEB8')
+      : undefined;
+    const chosenColor = isPaint ? { name: finalColor, hex: finalHex || '#86DEB8' } : undefined;
+
+    const itemsDesc: string[] = [];
+
+    if (onAddToCart) {
+      if (isPaint) {
+        if (calculation.totalCuñetes > 0) {
+          onAddToCart(targetItem, calculation.totalCuñetes, 'cuñete', chosenColor);
+          itemsDesc.push(`${calculation.totalCuñetes} Cuñete(s) de ${targetItem.productName} (${finalColor})`);
+        }
+        if (calculation.remainderGalons > 0) {
+          onAddToCart(targetItem, calculation.remainderGalons, 'galon', chosenColor);
+          itemsDesc.push(`${calculation.remainderGalons} Galón(es) de ${targetItem.productName} (${finalColor})`);
+        }
+        if (calculation.totalCuñetes === 0 && calculation.remainderGalons === 0) {
+          const g = calculation.totalGalons || 1;
+          onAddToCart(targetItem, g, 'galon', chosenColor);
+          itemsDesc.push(`${g} Galón(es) de ${targetItem.productName} (${finalColor})`);
+        }
+      } else {
+        onAddToCart(targetItem, materialQuantity, 'unidad');
+        itemsDesc.push(`${materialQuantity} unidad(es) de ${targetItem.productName}`);
+      }
+
+      // Añadir adicionales si fueron incluidos en la solicitud
+      for (const extra of extraItems) {
+        const matchedExtra = inventoryList.find((i) => i.sku === extra.sku || i.id === extra.sku) || {
+          id: extra.sku,
+          sku: extra.sku,
+          productName: extra.productName,
+          category: extra.category,
+          warehouseCity: extra.warehouseCity || city,
+          warehouseName: extra.warehouseName || nearestWarehouse.name,
+          cuñetesAvailable: 50,
+          galonesAvailable: 200,
+          quartsAvailable: 50,
+          totalLiters: 1000,
+          minStockAlert: 20,
+          batchCode: 'LOTE-EXTRA-2026',
+          expirationDate: '2028-12-31',
+          status: 'optimo' as const,
+          lastUpdated: new Date().toISOString(),
+          pricePerGalon: extra.unitPrice,
+          unitPrice: extra.unitPrice,
+          unitType: extra.itemType === 'pintura' ? ('pintura' as const) : ('herramienta' as const),
+          description: extra.productName,
+          imageUrl: getProductImage({ productName: extra.productName, category: extra.category }),
+        };
+        onAddToCart(
+          matchedExtra,
+          extra.quantity,
+          extra.presentation as any,
+          extra.colorName ? { name: extra.colorName, hex: extra.colorHex || '#F1F5F9' } : undefined
+        );
+        itemsDesc.push(`${extra.quantity}x ${extra.productName}`);
+      }
+    }
+
+    setAddedToCartNotification(`¡${itemsDesc.join(' + ')} agregado(s) al carrito! Puedes seguir formulando otros espacios, explorar el catálogo o tramitar tu pedido cuando desees.`);
+  };
+
+  const handleResetFormForNextItem = () => {
+    if (onClearSelectedCatalogItem) onClearSelectedCatalogItem();
+    setExtraItems([]);
+    setAreaM2(80);
+    setNotes('');
+    setAddedToCartNotification(null);
+  };
+
   const surfaces: { key: SurfaceType; label: string; desc: string; icon: string }[] = [
     { key: 'mamposteria_interior', label: 'Pared Interior', desc: 'Viniltex BioCuidado', icon: '🏠' },
     { key: 'fachada_exterior', label: 'Fachada Exterior', desc: 'Koraza Protección', icon: '🏢' },
@@ -450,62 +627,34 @@ export const RequestView: React.FC<RequestViewProps> = ({
   return (
     <div className="w-full bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs" id="request-view-card">
       <div className="request-top flex justify-between items-center mb-2">
-        <span className="card-eyebrow !mb-0" id="step-eyebrow">
+        <span className="card-eyebrow !mb-0 text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200" id="step-eyebrow">
           {selectedCatalogItem
             ? isPaint
-              ? 'ORDEN DE PINTURA DEL CATÁLOGO'
-              : 'ORDEN DE MATERIAL & HERRAMIENTAS'
-            : 'PASO 1 DE 5 · FORMULACIÓN TÉCNICA'}
+              ? '🎨 ORDEN DE PINTURA DEL CATÁLOGO CEDI'
+              : '📦 ORDEN DE MATERIAL & HERRAMIENTAS'
+            : '🎨 FORMULACIÓN & CREACIÓN DE PINTURA NUEVA CON MATERIALES CEDI'}
         </span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onViewTransversal}
-            className="text-xs font-semibold text-teal-700 hover:text-teal-800 bg-teal-50 px-2.5 py-1 rounded-md border border-teal-200 transition-colors cursor-pointer"
-          >
-            Vista 360° Reto
-          </button>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="btn-ghost text-xs text-slate-500 hover:text-red-600 cursor-pointer"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Salir
-          </button>
-        </div>
       </div>
-
-      <div className="mini-stepper">
-        <span className="mini-dot is-on" />
-        <span className="mini-track is-on" />
-        <span className="mini-dot" />
-        <span className="mini-track" />
-        <span className="mini-dot" />
-        <span className="mini-track" />
-        <span className="mini-dot" />
-        <span className="mini-track" />
-        <span className="mini-dot" />
-      </div>
-      <p className="mini-stepper-label">
-        Solicitante: <strong className="text-navy-900">{currentUser.name}</strong> ({currentUser.city})
-      </p>
 
       <div className="mb-4">
-        <h2 className="card-title text-2xl" id="request-title">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <h2 className="card-title text-2xl font-['Space_Grotesk'] text-slate-900" id="request-title">
+            {selectedCatalogItem
+              ? isPaint
+                ? 'Personalizar Orden de Pintura Pintuco'
+                : 'Detalles de Compra de Material / Insumo'
+              : 'Crear Nueva Pintura con Materiales Disponibles'}
+          </h2>
+          <span className="text-xs text-slate-500 font-medium">
+            Solicitante: <strong className="text-navy-900 font-semibold">{currentUser.name}</strong> ({currentUser.city})
+          </span>
+        </div>
+        <p className="card-subtitle !mb-3 text-slate-600 text-xs sm:text-sm">
           {selectedCatalogItem
             ? isPaint
-              ? 'Personalizar Orden de Pintura Pintuco'
-              : 'Detalles de Compra de Material / Insumo'
-            : 'Registrar Requerimiento Técnico'}
-        </h2>
-        <p className="card-subtitle !mb-3">
-          {selectedCatalogItem
-            ? isPaint
-              ? 'Elige el color y el acabado que deseas para tu pintura. El sistema calculará el volumen exacto y lo descontará del inventario CEDI.'
+              ? 'Elige el color y el acabado que deseas para tu pintura. El sistema calculará el volumen exacto y podrás agregarlo al carrito o comprarlo.'
               : 'Indica la cantidad requerida de este material como en una tienda oficial. Se descontará del stock disponible de la bodega CEDI.'
-            : 'Ingrese las especificaciones del área a intervenir. El sistema valida en tiempo real la disponibilidad en inventario CEDI.'}
+            : 'Formula tu pintura personalizada combinando bases técnicas, tonos pigmentados y acabados con existencias en bodega CEDI. Puedes agregarla al carrito para seguir comprando o tramitar la orden directa.'}
         </p>
       </div>
 
@@ -545,6 +694,50 @@ export const RequestView: React.FC<RequestViewProps> = ({
               <span className="px-3 py-1.5 rounded-xl bg-white text-teal-800 border border-teal-200 font-bold text-xs shadow-2xs">
                 Fórmula lista para confirmar
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==========================================================
+          CÁLCULO TÉCNICO APLICADO DESDE LA CALCULADORA M²
+          ========================================================== */}
+      {initialPendingData && !initialPendingData.roomTitle && (initialPendingData.notes?.includes('Calculadora') || initialPendingData.areaM2) && (
+        <div
+          className="mb-5 p-4 rounded-2xl border-2 border-emerald-500/70 bg-gradient-to-r from-emerald-50 via-teal-50/60 to-emerald-50 text-slate-800 shadow-sm animate-fade-in"
+          id="banner-calculator-applied"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl flex-shrink-0 bg-emerald-600 text-white shadow-md flex items-center justify-center font-bold">
+                <Sliders className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-700 text-white shadow-2xs">
+                    CÁLCULO TÉCNICO APLICADO CON ÉXITO
+                  </span>
+                  <span className="text-xs text-emerald-800 font-semibold">✓ {areaM2} m² cargados en tu nueva formulación</span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                  Nueva Pintura para: {surfaces.find(s => s.key === surfaceType)?.label || 'Superficie'} ({areaM2} m²)
+                </h3>
+                <p className="text-xs text-slate-600">
+                  Volumen calculado: <strong className="text-slate-900">{calculation.totalCuñetes > 0 ? `${calculation.totalCuñetes} Cuñete(s) + ` : ''}{calculation.remainderGalons} Galón(es)</strong>. Puedes elegir el tono de color deseado y agregarlo al carrito o comprarlo de inmediato.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {onClearInitialPendingData && (
+                <button
+                  type="button"
+                  onClick={onClearInitialPendingData}
+                  className="px-3 py-1.5 rounded-xl bg-white text-slate-600 hover:text-slate-900 border border-slate-300 font-bold text-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  ✕ Limpiar cálculo
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -940,36 +1133,100 @@ export const RequestView: React.FC<RequestViewProps> = ({
                   </div>
                 )}
 
-                {/* Fila: Área en m2 y Segmento */}
-                <div className="field-row">
-                  <Field
-                    id="req-area"
-                    label="Área total a pintar (m²)"
-                    type="number"
-                    value={areaM2}
-                    onChange={(e) => setAreaM2(Number(e.target.value))}
-                    placeholder="Ej. 120"
-                    min={1}
-                    max={50000}
-                    icon={<Layers className="w-4 h-4" />}
-                    hint="Mide alto × ancho de cada pared"
-                    required
-                  />
+                {/* Fila: Área en m2 Interactiva con Slider y Presets Rápidos */}
+                <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label htmlFor="req-area" className="text-xs font-bold text-navy-900 flex items-center gap-1.5">
+                        <Layers className="w-4 h-4 text-blue-700" />
+                        <span>Área Total a Pintar (m²)</span>
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        Ajusta con el deslizador interactivo o escribe el valor exacto de tus paredes.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 px-3 py-1 rounded-xl">
+                      <span className="font-mono text-base font-black text-blue-950 tabular-nums">
+                        {areaM2}
+                      </span>
+                      <span className="text-[11px] font-bold text-blue-700 font-mono">m²</span>
+                    </div>
+                  </div>
 
-                  <Field
-                    id="req-project-type"
-                    label="Segmento de Proyecto"
-                    type="select"
-                    value={projectType}
-                    onChange={(e) => setProjectType(e.target.value as any)}
-                    icon={<Building className="w-4 h-4" />}
-                    options={[
-                      { value: 'Residencial', label: 'Residencial (Casas / Aptos)' },
-                      { value: 'Comercial', label: 'Comercial (Locales / Oficinas)' },
-                      { value: 'Industrial', label: 'Industrial (Plantas / Bodegas)' },
-                      { value: 'Institucional', label: 'Institucional (Salud / Edu)' },
-                    ]}
-                  />
+                  {/* Slider Interactivo de Rango */}
+                  <div className="space-y-1.5 pt-1">
+                    <input
+                      type="range"
+                      min={10}
+                      max={500}
+                      step={5}
+                      value={Math.min(500, Math.max(10, areaM2 || 10))}
+                      onChange={(e) => setAreaM2(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 transition-all hover:bg-slate-300"
+                      id="range-area-slider"
+                    />
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                      <span>10 m² (Mín)</span>
+                      <span>150 m² (Promedio)</span>
+                      <span>500+ m² (Gran Obra)</span>
+                    </div>
+                  </div>
+
+                  {/* Presets Rápidos de Espacios Típicos */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+                    <span className="text-[11px] text-slate-500 font-medium">Presets:</span>
+                    {[
+                      { label: 'Habitación (35 m²)', val: 35 },
+                      { label: 'Apartamento (75 m²)', val: 75 },
+                      { label: 'Casa Completa (150 m²)', val: 150 },
+                      { label: 'Fachada / Edificio (350 m²)', val: 350 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.val}
+                        type="button"
+                        onClick={() => setAreaM2(preset.val)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all duration-150 cursor-pointer active:scale-95 ${
+                          areaM2 === preset.val
+                            ? 'bg-blue-600 text-white font-bold shadow-xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Campo numérico manual y Segmento de Proyecto */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <Field
+                      id="req-area-manual"
+                      label="Valor Numérico Exacto (m²)"
+                      type="number"
+                      value={areaM2}
+                      onChange={(e) => setAreaM2(Number(e.target.value))}
+                      placeholder="120"
+                      min={1}
+                      max={50000}
+                      icon={<Layers className="w-4 h-4" />}
+                      hint="Cálculo automático de cuñetes y galones"
+                      required
+                    />
+
+                    <Field
+                      id="req-project-type"
+                      label="Segmento de Proyecto"
+                      type="select"
+                      value={projectType}
+                      onChange={(e) => setProjectType(e.target.value as any)}
+                      icon={<Building className="w-4 h-4" />}
+                      options={[
+                        { value: 'Residencial', label: 'Residencial (Casas / Aptos)' },
+                        { value: 'Comercial', label: 'Comercial (Locales / Oficinas)' },
+                        { value: 'Industrial', label: 'Industrial (Plantas / Bodegas)' },
+                        { value: 'Institucional', label: 'Institucional (Salud / Edu)' },
+                      ]}
+                    />
+                  </div>
                 </div>
 
                 {/* Ciudad y Condición Ambiental */}
@@ -1422,35 +1679,94 @@ export const RequestView: React.FC<RequestViewProps> = ({
               </div>
             )}
 
-            {/* Botón de Enviar Pedido */}
+            {/* Banner de Notificación de Producto Agregado al Carrito */}
+            {addedToCartNotification && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-2 animate-fade-in text-xs shadow-xs">
+                <div className="flex items-center gap-2 text-emerald-900 font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>¡Producto(s) Agregado(s) al Carrito!</span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-snug">
+                  {addedToCartNotification}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1.5">
+                  {onOpenCart && (
+                    <button
+                      type="button"
+                      onClick={onOpenCart}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      <span>Ver Carrito de Compras</span>
+                    </button>
+                  )}
+                  {onNavigateCatalog && (
+                    <button
+                      type="button"
+                      onClick={onNavigateCatalog}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Boxes className="w-3.5 h-3.5" />
+                      <span>Seguir Comprando en Catálogo</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleResetFormForNextItem}
+                    className="px-3 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100/60 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    ➕ Formular Otro Espacio
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Botón Principal: Agregar al Carrito para NO comprar de una vez y poder seguir comprando */}
+            <div className="space-y-1.5 pt-1">
+              <button
+                type="button"
+                id="btn-add-to-cart-request"
+                onClick={handleAddToCartAndContinue}
+                disabled={!currentStockStatus.isAvailable || isSubmitting}
+                className={`w-full py-4 px-5 rounded-2xl font-black text-sm shadow-md transition-all duration-200 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.98] ${
+                  !currentStockStatus.isAvailable
+                    ? 'border border-slate-300 bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/25 hover:shadow-emerald-600/40 ring-2 ring-emerald-400/40'
+                }`}
+              >
+                <ShoppingCart className="w-5 h-5 text-white shrink-0" />
+                <span>🛒 Agregar al Carrito (Seguir Comprando)</span>
+              </button>
+              <p className="text-[11px] text-center text-slate-500 font-medium">
+                Guarda esta pintura formulada en tu carrito sin hacer la compra de una vez para que puedas seguir agregando más pedidos.
+              </p>
+            </div>
+
+            {/* Botón Secundario: Comprar de una vez / Generar Orden Directa */}
             <button
               type="submit"
               id="btn-submit-paint-request"
-              className={`w-full py-3.5 px-4 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              className={`w-full py-3 px-4 rounded-xl font-bold text-xs border transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] ${
                 !currentStockStatus.isAvailable
-                  ? 'bg-slate-700 text-slate-300 cursor-not-allowed border border-slate-600 shadow-none'
-                  : isPaint
-                  ? 'bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white'
-                  : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white'
+                  ? 'bg-slate-700 text-slate-300 cursor-not-allowed border-slate-600 shadow-none'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300 shadow-xs'
               }`}
               disabled={!currentStockStatus.isAvailable || isSubmitting}
             >
               {isSubmitting ? (
                 <span className="flex items-center gap-2 justify-center">
-                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full spin" />
-                  <span>Descontando inventario y generando orden en tiempo real...</span>
+                  <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin" />
+                  <span>Generando orden y sincronizando inventario en tiempo real...</span>
                 </span>
               ) : !currentStockStatus.isAvailable ? (
-                <span className="flex items-center gap-2 justify-center text-red-200">
+                <span className="flex items-center gap-2 justify-center text-red-400">
                   <Lock className="w-4 h-4 text-red-400" />
                   <span>Bloqueado: Sin existencias en CEDI</span>
                 </span>
               ) : (
-                <span className="flex items-center gap-2 justify-center text-sm">
-                  {!isPaint
-                    ? `🛒 Confirmar Pedido (${extraItems.length > 0 ? `${extraItems.length + 1} productos - ` : ''}$${(totalCostCOP + extraItems.reduce((acc, it) => acc + it.totalCostCOP, 0)).toLocaleString('es-CO')} COP)`
-                    : `🎨 Generar Orden (${extraItems.length > 0 ? `${extraItems.length + 1} productos - ` : ''}$${(totalCostCOP + extraItems.reduce((acc, it) => acc + it.totalCostCOP, 0)).toLocaleString('es-CO')} COP)`}
-                  <ArrowRight className="w-4 h-4" />
+                <span className="flex items-center gap-2 justify-center text-xs font-semibold text-slate-700">
+                  <span>⚡ O comprar ahora de una vez (${(totalCostCOP + extraItems.reduce((acc, it) => acc + it.totalCostCOP, 0)).toLocaleString('es-CO')} COP)</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </span>
               )}
             </button>
